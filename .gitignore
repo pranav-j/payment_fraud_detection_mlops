@@ -1,0 +1,82 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.installed.cfg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# uv
+.uv/
+
+# Jupyter
+.ipynb_checkpoints/
+*-checkpoint.ipynb
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Secrets and environment
+.env
+.env.local
+*.pem
+*.key
+secrets/
+
+# Data — never commit raw data to Git
+data/raw/*
+data/interim/*
+data/processed/*
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+
+# Models and experiment artifacts
+mlruns/
+mlflow.db
+*.joblib
+*.pkl
+*.model
+models/
+!src/fraud_mlops/models/
+
+# Reports — keep figures, ignore HTML reports for now
+reports/*.html
+reports/*.pdf
+
+# Logs
+*.log
+logs/
+
+# AWS
+.aws/
+
+# Terraform (for later weeks)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
