@@ -80,3 +80,8 @@ logs/
 *.tfstate.*
 .terraform/
 .terraform.lock.hcl
+
+# MLflow local state
+mlruns/
+mlflow.db
+mlflow.db-journal

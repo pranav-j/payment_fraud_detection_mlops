@@ -20,6 +20,13 @@ data:  ## Download PaySim dataset from Kaggle
 notebook:  ## Launch JupyterLab
 	uv run jupyter lab
 
+mlflow-ui:  ## Launch the MLflow UI at http://localhost:5000
+	uv run mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
+
+mlflow-clean:  ## DANGER: delete all MLflow runs and the SQLite DB
+	rm -rf mlruns mlflow.db
+	@echo "✓ Cleared MLflow state. Next training run starts fresh."
+
 lint:  ## Run linter without fixing
 	uv run ruff check .
 	uv run mypy src/
