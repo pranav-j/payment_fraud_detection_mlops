@@ -79,3 +79,6 @@ disallow_untyped_defs = false  # relaxed for now; tighten later
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v --cov=src/fraud_mlops --cov-report=term-missing"
+markers = [
+    "integration: tests that require MLflow tracking server and a production model",
+]

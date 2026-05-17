@@ -47,3 +47,9 @@ clean:  ## Clean build artifacts and caches
 	find . -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .ruff_cache -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .ipynb_checkpoints -exec rm -rf {} + 2>/dev/null || true
+
+test-unit:  ## Run only fast unit tests (skip integration)
+	uv run pytest -m "not integration"
+
+test-integration:  ## Run integration tests (requires MLflow + production model)
+	uv run pytest -m integration
