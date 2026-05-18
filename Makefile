@@ -53,3 +53,9 @@ test-unit:  ## Run only fast unit tests (skip integration)
 
 test-integration:  ## Run integration tests (requires MLflow + production model)
 	uv run pytest -m integration
+
+api:  ## Run the FastAPI app locally with auto-reload
+	uv run uvicorn fraud_mlops.api:app --reload --host 0.0.0.0 --port 8000
+
+api-docs:  ## Open the auto-generated Swagger UI
+	@echo "Open http://localhost:8000/docs in your browser (start the API with 'make api' first)"

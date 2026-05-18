@@ -80,11 +80,13 @@ class FraudDetector:
 
     def __init__(
         self,
-        model: Any,  # sklearn Pipeline; Any to avoid heavy import in type sig
+        model: Any,
         threshold: float,
         version: str,
         feature_set: str,
     ) -> None:
+        if not isinstance(version, str):
+            raise TypeError(f"version must be str, got {type(version).__name__}={version!r}")
         self._model = model
         self._threshold = threshold
         self._version = version
@@ -172,7 +174,7 @@ def load_production_detector() -> FraudDetector:
 
     logger.info(
         "Loaded fraud-detector v%s (feature_set=%s, threshold=%.4f)",
-        version.version,
+        str(version.version),
         feature_set,
         threshold,
     )
@@ -180,6 +182,6 @@ def load_production_detector() -> FraudDetector:
     return FraudDetector(
         model=model,
         threshold=threshold,
-        version=version.version,
+        version=str(version.version),
         feature_set=feature_set,
     )
