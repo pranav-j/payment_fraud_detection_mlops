@@ -85,3 +85,7 @@ logs/
 mlruns/
 mlflow.db
 mlflow.db-journal
+
+mlflow_data/mlruns/
+mlflow_data/mlflow.db
+mlflow_data/mlflow.db-journal

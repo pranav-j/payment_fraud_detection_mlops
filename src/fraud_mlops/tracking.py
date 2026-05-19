@@ -21,10 +21,10 @@ from fraud_mlops.config import PROJECT_ROOT
 logger = logging.getLogger(__name__)
 
 # Where the SQLite metadata file lives. This is the backend store.
-DEFAULT_TRACKING_DB: Path = PROJECT_ROOT / "mlflow.db"
+DEFAULT_TRACKING_DB: Path = PROJECT_ROOT / "mlflow_data" / "mlflow.db"
 
 # Where artifacts (model files, plots) get uploaded. This is the artifact store.
-DEFAULT_ARTIFACT_ROOT: Path = PROJECT_ROOT / "mlruns"
+DEFAULT_ARTIFACT_ROOT: Path = PROJECT_ROOT / "mlflow_data" / "mlruns"
 
 # Default experiment name. Override via env var if you want.
 DEFAULT_EXPERIMENT: str = "fraud_baseline"
@@ -59,10 +59,14 @@ def setup_mlflow(
         os.getenv("MLFLOW_ARTIFACT_ROOT", str(DEFAULT_ARTIFACT_ROOT))
     )
 
-    # Ensure artifact dir exists. SQLite file is auto-created on first use.
-    artifact_root.mkdir(parents=True, exist_ok=True)
-
     mlflow.set_tracking_uri(tracking_uri)
+
+    # Only create local artifact directory if we're using a local file-based
+    # tracking URI. When tracking_uri is an HTTP URL (Docker, production),
+    # the server owns the artifact store and we have no business creating
+    # local directories.
+    if tracking_uri.startswith("sqlite:") or tracking_uri.startswith("file:"):
+        artifact_root.mkdir(parents=True, exist_ok=True)
 
     # set_experiment is idempotent — it creates if missing, sets as active if found.
     # The artifact_location is only honored on creation; subsequent calls keep the

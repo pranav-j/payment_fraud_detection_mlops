@@ -375,6 +375,31 @@ Use AWS RDS for PostgreSQL (db.t4g.micro under free tier for the first 12 months
 
 ---
 
+## ADR-012: Local Docker stack cannot load models registered pre-containerization
+
+**Status:** Accepted as known limitation. Resolved in week 4 via S3 migration.
+
+**Context:** MLflow 3.x stores model artifacts using internal "logged model"
+URIs (e.g., `models:/m-c7ab...`) rather than concrete filesystem paths. When
+models are registered through a local SQLite client (notebooks), the
+artifact metadata is keyed to local filesystem locations. When the same
+SQLite database is later served by an MLflow server inside Docker, the
+server cannot resolve those logged-model URIs to artifacts the API
+container can read.
+
+**Decision:** Acknowledge the limitation. Do not invest further in working
+around it locally. The structural fix is to move artifacts to S3 in week 4,
+which produces universal URIs (`s3://bucket/key`) that resolve identically
+from any environment.
+
+**Consequences:** The Week 3 Docker stack proves the deployment architecture
+(FastAPI + MLflow server, Docker network, healthchecks, non-root user) but
+cannot serve predictions until artifacts are migrated. This is acceptable
+because the integration test against local Python (notebook 03) already
+proves the model loading works; Docker only adds the deployment shell.
+
+---
+
 ## Decision matrix summary
 
 The following table captures the high-level positioning of each major decision:

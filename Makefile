@@ -21,7 +21,7 @@ notebook:  ## Launch JupyterLab
 	uv run jupyter lab
 
 mlflow-ui:  ## Launch the MLflow UI at http://localhost:5000
-	uv run mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
+	uv run mlflow ui --backend-store-uri sqlite:///mlflow_data/mlflow.db --port 5000
 
 mlflow-clean:  ## DANGER: delete all MLflow runs and the SQLite DB
 	rm -rf mlruns mlflow.db
@@ -59,3 +59,18 @@ api:  ## Run the FastAPI app locally with auto-reload
 
 api-docs:  ## Open the auto-generated Swagger UI
 	@echo "Open http://localhost:8000/docs in your browser (start the API with 'make api' first)"
+
+docker-build:  ## Build both Docker images
+	docker compose build
+
+docker-up:  ## Start the stack (detached)
+	docker compose up -d
+
+docker-logs:  ## Tail logs from both containers
+	docker compose logs -f
+
+docker-down:  ## Stop and remove containers (keeps volumes)
+	docker compose down
+
+docker-clean:  ## DANGER: stop containers AND remove volumes (loses MLflow data)
+	docker compose down -v

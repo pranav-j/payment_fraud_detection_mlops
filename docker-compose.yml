@@ -1,0 +1,42 @@
+services:
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
+    image: fraud-mlops-mlflow:dev
+    container_name: fraud-mlops-mlflow
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./mlflow_data:/mlflow_data
+    command:
+      - mlflow
+      - server
+      - --backend-store-uri
+      - sqlite:////mlflow_data/mlflow.db
+      - --artifacts-destination
+      - /mlflow_data/mlruns
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+      - --allowed-hosts
+      - "*"
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.fastapi
+    image: fraud-mlops-api:dev
+    container_name: fraud-mlops-api
+    ports:
+      - "8000:8000"
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      - ./mlflow_data:/mlflow_data:ro
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    restart: unless-stopped

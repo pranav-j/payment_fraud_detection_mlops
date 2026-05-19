@@ -1,0 +1,74 @@
+# syntax=docker/dockerfile:1.7
+
+# ─── Stage 1: builder ────────────────────────────────────────────────
+# Installs Python dependencies into a virtual environment.
+# This stage has access to build tools; the runtime stage does not.
+FROM python:3.12-slim-bookworm AS builder
+
+# uv: fast Python package manager
+COPY --from=ghcr.io/astral-sh/uv:0.5.1 /uv /usr/local/bin/uv
+
+# System packages needed to build wheels (libomp for xgboost; build-essential
+# is needed if any wheel doesn't have a prebuilt arm64/x64 binary)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        libomp-dev \
+        && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy only dep specs first — this caches well: as long as pyproject.toml
+# and uv.lock don't change, Docker reuses the dep-install layer.
+COPY pyproject.toml uv.lock README.md ./
+
+# Install runtime dependencies into /app/.venv
+# --no-dev skips dev dependencies (pytest, jupyterlab, etc.) — they aren't
+# needed at runtime and would inflate the image.
+RUN uv sync --frozen --no-dev --no-install-project
+
+# Now copy the application source and install the package itself
+COPY src/ ./src/
+RUN uv sync --frozen --no-dev
+
+
+# ─── Stage 2: runtime ────────────────────────────────────────────────
+# A clean slim image with only the venv and the app source.
+FROM python:3.12-slim-bookworm AS runtime
+
+# libgomp1 is the runtime OpenMP library that xgboost needs.
+# (We had libomp-dev in the builder for compilation; libgomp1 is enough
+# at runtime and much smaller.)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libgomp1 \
+        && rm -rf /var/lib/apt/lists/*
+
+# Create a non-root user. Running as root in containers is a security
+# anti-pattern; if the container is compromised, root-in-container can be
+# exploited to escape.
+RUN useradd --create-home --shell /bin/bash app
+
+WORKDIR /app
+
+# Copy the venv and source from the builder stage
+COPY --from=builder --chown=app:app /app/.venv /app/.venv
+COPY --from=builder --chown=app:app /app/src /app/src
+
+# Make the venv's Python the default; no need for `uv run` at runtime
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Drop to the non-root user
+USER app
+
+EXPOSE 8000
+
+# Healthcheck: docker compose uses this to know when the service is ready.
+# The /health endpoint is cheap and doesn't touch the model.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()" || exit 1
+
+# Use uvicorn directly (no --reload in production — that's a dev-only flag)
+CMD ["uvicorn", "fraud_mlops.api:app", "--host", "0.0.0.0", "--port", "8000"]

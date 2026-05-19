@@ -1,0 +1,60 @@
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+build/
+dist/
+
+# Virtual environments — we install fresh inside the container
+.venv
+venv
+
+# Caches
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+
+# IDE
+.vscode
+.idea
+*.swp
+
+# Git
+.git
+.gitignore
+.github
+
+# Data files — never bake data into images
+data/raw/*
+data/interim/*
+data/processed/*
+
+# MLflow state — comes in via volume mount instead
+mlruns
+mlflow.db
+mlflow.db-journal
+
+# Notebooks — not needed at runtime
+notebooks/.ipynb_checkpoints
+
+# Models — loaded from MLflow at runtime, not baked in
+models/*.joblib
+
+# Misc
+.DS_Store
+.env
+.env.local
+.python-version
+reports/
+docs/
+scripts/
+tests/
+
+# Docker files themselves
+Dockerfile*
+docker-compose.yml
+.dockerignore
