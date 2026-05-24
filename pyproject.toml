@@ -26,6 +26,8 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "pydantic>=2.9.0",
+    "boto3>=1.43.14",
+    "psycopg2-binary>=2.9.12",
 ]
 
 [project.optional-dependencies]
