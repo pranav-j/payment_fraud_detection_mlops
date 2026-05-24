@@ -447,3 +447,52 @@ That answer is far stronger than "I used Kinesis because the tutorial used it." 
 ---
 
 *References used:* Michael Nygard's original ADR proposal (2011), Joel Parker Henderson's adr-templates GitHub repo, ThoughtWorks Tech Radar guidance on architectural decisions.
+
+
+
+
+
+Fair. The earlier ADRs are long because they record decisions with many alternatives; ADR-013 had basically one real choice (move state to cloud, yes/no), so it doesn't need the same surface area. Here's a tighter version:
+
+---
+
+## ADR-013: Migrate MLflow backend to RDS Postgres and artifacts to S3
+
+**Status:** Accepted
+
+### Context
+
+ADR-003 deferred "RDS Postgres for cloud deployments" to a later week. ADR-012 documented that the Week 3 Docker stack couldn't serve predictions because MLflow's logged-model URIs resolved to filesystem paths inside the MLflow container that the FastAPI container couldn't read. Sharing a Docker volume would have masked the symptom; the underlying problem is that MLflow state was tied to a single machine.
+
+### Decision
+
+Move MLflow's backend store from local SQLite to **RDS PostgreSQL 16** (`db.t4g.micro`, Free Tier, `ap-south-1`) and its artifact store from local filesystem to **S3** (`s3://fraud-mlops-kidiloski/mlflow-artifacts`).
+
+- MLflow server runs on the developer's Mac (`127.0.0.1:5000`) pointed at both backends. Server-on-Fargate deferred to a later week.
+- Config in `.env` (gitignored), loaded via `python-dotenv`. `setup_mlflow()` calls `load_dotenv()` so notebooks, FastAPI, and future Lambda all configure identically without depending on shell environment.
+- Re-trained the model through the new server rather than migrating v3 artifacts. New registry's `fraud-detector` v1 supersedes old v3. `inference.py` needs no changes — it resolves by alias (`@production`), not version.
+
+### Alternatives Considered
+
+1. **Docker volume sharing** — Rejected. Solves ADR-012's symptom but not the underlying state-locality problem; Lambda would hit the same wall.
+2. **MinIO + Postgres in Docker Compose** — Rejected. Local emulation of AWS is a weaker signal than real AWS integration; week 4's explicit goal was to stop simulating.
+3. **Aurora Serverless v2** — Rejected on cost. ~$65/month minimum vs. Free Tier on `db.t4g.micro`.
+4. **Migrate v3 artifacts via `download_artifacts` + re-log** — Rejected. Migration code has zero portfolio value; re-training takes 1-5 min and gives a cleaner new-MLflow story.
+
+### Consequences
+
+**Positive:**
+- MLflow state is now location-independent. Any process with AWS credentials resolves `models:/fraud-detector@production` to the same S3 object. Unblocks Week 5's Lambda.
+- ADR-012's Docker blocker is structurally fixed — same S3 URI resolves identically from any container.
+- The `setup_mlflow()` abstraction from Week 2 paid off: zero code changes, only env vars switched.
+- Free Tier covers RDS (750 hrs/month db.t4g.micro, 20 GB storage) and S3 artifact storage (~715 KB per model) through the project.
+
+**Negative:**
+- FastAPI startup now requires network. Cold-start 2-4s vs. <500ms locally.
+- Home IP rotation breaks RDS connectivity until the security group is updated. Manageable solo; needs bastion/VPN for a team.
+- Single-AZ `db.t4g.micro`, no Multi-AZ — zone failure takes MLflow offline. Acceptable for portfolio.
+- Cost discipline: RDS bills storage 24/7, stopped instances auto-restart after 7 days. "Stop RDS at end of session" is now a standing rule, backstopped by a $20 billing alarm.
+
+**What this signals to interviewers:** "Cloud-native" means application state lives independently of the machine that produced it, not "I deployed to AWS." Recognizing that ADR-012's symptom and this fix are causally linked — and that alias-based model resolution was specifically designed so this migration required zero code changes.
+
+---
