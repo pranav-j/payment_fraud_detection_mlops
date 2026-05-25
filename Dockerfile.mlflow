@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1.7
+
+FROM python:3.12-slim-bookworm
+
+# MLflow plus drivers for cloud backends:
+# - psycopg2-binary: connects to RDS Postgres for metadata.
+# - boto3: uploads/downloads artifacts to/from S3.
+RUN pip install --no-cache-dir \
+    mlflow==3.12.0 \
+    psycopg2-binary==2.9.11 \
+    boto3==1.35.92
+
+# Non-root user. --create-home gives /home/mlflow where ~/.aws is mounted
+# locally; on Fargate, credentials come from the task IAM role.
+RUN useradd --create-home --shell /bin/bash mlflow
+USER mlflow
+WORKDIR /home/mlflow
+
+EXPOSE 5000
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health').read()" || exit 1
+
+# No default CMD — the runner (compose, ECS) supplies it explicitly.

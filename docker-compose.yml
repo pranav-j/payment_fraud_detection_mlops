@@ -3,19 +3,21 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.mlflow
-    image: fraud-mlops-mlflow:dev
+    image: fraud-mlops-mlflow:cloud
     container_name: fraud-mlops-mlflow
     ports:
       - "5001:5000"
     volumes:
-      - ./mlflow_data:/mlflow_data
+      # Reuse host Mac's AWS credentials, read-only.
+      # boto3 finds them at /home/mlflow/.aws/credentials inside the container.
+      - ~/.aws:/home/mlflow/.aws:ro
     command:
       - mlflow
       - server
       - --backend-store-uri
-      - sqlite:////mlflow_data/mlflow.db
-      - --artifacts-destination
-      - /mlflow_data/mlruns
+      - postgresql://${RDS_USER}:${RDS_PASSWORD}@${RDS_HOST}:${RDS_PORT}/${RDS_DB}
+      - --default-artifact-root
+      - ${MLFLOW_ARTIFACT_ROOT}
       - --host
       - 0.0.0.0
       - --port
@@ -28,15 +30,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.fastapi
-    image: fraud-mlops-api:dev
+    image: fraud-mlops-api:cloud
     container_name: fraud-mlops-api
     ports:
       - "8000:8000"
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
-    volumes:
-      - ./mlflow_data:/mlflow_data:ro
     depends_on:
       mlflow:
         condition: service_healthy
     restart: unless-stopped
+    volumes:
+      - ~/.aws:/home/app/.aws:ro
