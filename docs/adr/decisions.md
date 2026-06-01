@@ -496,3 +496,42 @@ Move MLflow's backend store from local SQLite to **RDS PostgreSQL 16** (`db.t4g.
 **What this signals to interviewers:** "Cloud-native" means application state lives independently of the machine that produced it, not "I deployed to AWS." Recognizing that ADR-012's symptom and this fix are causally linked — and that alias-based model resolution was specifically designed so this migration required zero code changes.
 
 ---
+
+---
+
+## ADR-014: Deploy MLflow and FastAPI as Fargate services behind an ALB
+
+**Status:** Accepted
+
+### Context
+
+ADR-013 moved MLflow state to RDS + S3, making it location-independent. Week 5's goal was to prove inference compute is equally location-independent — running entirely in AWS without the developer's laptop. The Week 3 Docker Compose stack proved the container architecture; this week promoted it to managed cloud compute.
+
+### Decision
+
+Deploy two ECS Fargate services on cluster `fraud-mlops` (`ap-south-1`):
+
+- **MLflow service** — internal only, reachable at `mlflow:5000` via ECS Service Connect. `1024 CPU / 2048 MB` ARM64. Backed by the existing RDS + S3 from Week 4.
+- **API service** — public via Application Load Balancer (`fraud-mlops-alb`) on HTTP port 80. `512 CPU / 1024 MB` ARM64. Loads `fraud-detector@production` from S3 at startup.
+
+Both images in ECR tagged `:v1`. RDS password stored in Secrets Manager as a full `postgresql://...?sslmode=require` URI, injected via the task definition `secrets` block. Task roles are least-privilege: MLflow task role has S3 read/write; API task role has S3 read only (needed because the API fetches artifacts directly from S3, not proxied through MLflow).
+
+### Alternatives Considered
+
+1. **HTTPS on ALB** — Rejected for this iteration. Requires a custom domain (~$10/year) with no learning benefit given the project uses synthetic data. ALB default DNS name used. Production deployment would add an ACM cert + HTTPS listener with no application code changes.
+2. **MLflow on ALB (public)** — Rejected. MLflow has no authentication; exposing it publicly is a real security hole. Service Connect keeps it private to the ECS network; SSM port-forward used when UI access is needed.
+3. **Proxied artifacts (MLflow Mode A, `--artifacts-destination`)** — Rejected for now. Would route all artifact bytes through MLflow, removing the need for S3 permissions on the API task role. Kept Mode B (`--default-artifact-root`) because it matches what was already tested locally and avoids a flag change + image rebuild mid-week.
+4. **Default VPC for ECS** — Rejected. RDS was provisioned in a non-default VPC (`vpc-07417979b25261bdc`). Placing ECS in the default VPC would require VPC peering; moving everything into the RDS VPC was simpler.
+
+### Consequences
+
+**Positive:**
+- First fully cloud-hosted inference: a public `curl` to the ALB returns a real prediction with no local dependencies.
+- Container architecture from Week 3 ported directly — same Dockerfiles, same `MLFLOW_TRACKING_URI=http://mlflow:5000` pattern that worked in Compose now works in Fargate via Service Connect.
+- `desired-count=0` between sessions stops task billing while preserving all service configuration.
+
+**Negative:**
+- ALB costs ~$0.008/hour (~$6/month) even when tasks are stopped. Must be deleted when the project ends or costs will accrue indefinitely.
+- `512 MB` was insufficient for MLflow 3.x — required bumping to `2048 MB`. Task definition went through three revisions (`:1` → `:2` → `:3`) before stabilising.
+- No HTTPS — traffic is unencrypted in transit. Acceptable for synthetic data; not acceptable for real PII.
+- RDS security group requires manual IP updates when the developer's home IP rotates. Fargate tasks use a fixed security group reference, so this only affects direct Mac → RDS access, not the Fargate → RDS path.
