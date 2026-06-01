@@ -1,0 +1,7 @@
+mlflow==3.12.0
+psycopg2-binary==2.9.11
+boto3==1.35.92
+pandas
+scikit-learn
+xgboost
+python-dotenv
