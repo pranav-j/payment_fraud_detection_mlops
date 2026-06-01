@@ -1,0 +1,58 @@
+{
+  "family": "fraud-mlops-mlflow",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::125773060711:role/fraud-mlops-ecs-execution-role",
+  "taskRoleArn": "arn:aws:iam::125773060711:role/fraud-mlops-mlflow-task-role",
+  "runtimePlatform": {
+    "cpuArchitecture": "ARM64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "containerDefinitions": [
+    {
+      "name": "mlflow",
+      "image": "125773060711.dkr.ecr.ap-south-1.amazonaws.com/fraud-mlops-mlflow:v1",
+      "essential": true,
+      "portMappings": [
+        {
+          "name": "mlflow",
+          "containerPort": 5000,
+          "protocol": "tcp"
+        }
+      ],
+      "entryPoint": ["sh", "-c"],
+      "command": [
+        "mlflow server --backend-store-uri $MLFLOW_BACKEND_URI --default-artifact-root s3://fraud-mlops-kidiloski/mlflow-artifacts --host 0.0.0.0 --port 5000 --allowed-hosts *"
+      ],
+      "secrets": [
+        {
+          "name": "MLFLOW_BACKEND_URI",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:125773060711:secret:fraud-mlops/rds/password-o6favQ"
+        }
+      ],
+      "environment": [
+        {
+          "name": "AWS_DEFAULT_REGION",
+          "value": "ap-south-1"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/fraud-mlops-mlflow",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health').read()\" || exit 1"],
+        "interval": 10,
+        "timeout": 3,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}
