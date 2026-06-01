@@ -416,6 +416,8 @@ The following table captures the high-level positioning of each major decision:
 | Terraform | Multi-cloud portability | HCL learning curve |
 | GitHub Actions | Native GitHub integration | Vendor lock-in to GitHub |
 | Postgres on RDS | SQL queryability | Doesn't scale horizontally |
+| Fargate (ECS) for serving | Production-grade cloud inference, no laptop dependency | ALB cost accrues even when tasks are stopped |
+| Lambda (Kinesis streaming path) | Event-driven inference, scales to zero | 24s cold start, Kinesis not Free Tier |
 
 ---
 
@@ -535,3 +537,42 @@ Both images in ECR tagged `:v1`. RDS password stored in Secrets Manager as a ful
 - `512 MB` was insufficient for MLflow 3.x — required bumping to `2048 MB`. Task definition went through three revisions (`:1` → `:2` → `:3`) before stabilising.
 - No HTTPS — traffic is unencrypted in transit. Acceptable for synthetic data; not acceptable for real PII.
 - RDS security group requires manual IP updates when the developer's home IP rotates. Fargate tasks use a fixed security group reference, so this only affects direct Mac → RDS access, not the Fargate → RDS path.
+
+
+
+
+## ADR-015: Lambda container image deployment for streaming fraud inference
+
+**Status:** Accepted
+
+### Context
+
+Week 6 introduced the streaming inference path: Kinesis Data Stream → Lambda → score transaction → write decision to RDS. This ADR records the non-obvious decisions made during Lambda deployment.
+
+### Decision
+
+Deploy the fraud-scorer Lambda as a **container image** (not a zip package) from ECR, running on **arm64** (Graviton2), placed **inside the RDS VPC** with an **S3 Gateway VPC Endpoint** for artifact access.
+
+### Alternatives Considered
+
+1. **Zip package instead of container image** — Rejected. The inference dependencies (xgboost, scikit-learn, mlflow, psycopg2) exceed Lambda's 250MB unzipped zip limit. Container images support up to 10GB.
+2. **x86_64 instead of arm64** — Rejected. The Mac build host is arm64; building x86_64 requires QEMU emulation (5-10× slower builds). Graviton2 Lambda is also ~20% cheaper per invocation. All dependencies have arm64 wheels.
+3. **OCI image index manifest (default Docker Buildx output)** — Rejected by Lambda. Lambda container functions do not support multi-platform manifest lists. Rebuilt with `--provenance=false` to produce a single-platform manifest.
+4. **Lambda outside the VPC** — Rejected. Lambda needs to reach RDS on port 5432. Placing Lambda in the RDS VPC (`vpc-07417979b25261bdc`) with a dedicated security group (`fraud-mlops-lambda-sg`) allows direct private connectivity without exposing RDS to the internet.
+5. **NAT Gateway for S3 access** — Rejected on cost (~$32/month). An S3 Gateway VPC Endpoint achieves the same result for free by routing S3 traffic through AWS's internal network rather than the public internet.
+6. **Secrets Manager for RDS password** — Deferred. Lambda doesn't natively inject Secrets Manager values into environment variables the way ECS does. Options are: (a) plain-text env var (current approach), (b) boto3 call at runtime (+~200ms cold start), (c) Lambda Extensions (complex). Plain-text env var accepted for this project; Lambda function configuration is not publicly accessible.
+
+### Consequences
+
+**Positive:**
+- Full streaming path works end-to-end: producer → Kinesis → Lambda → RDS decisions table.
+- Model loads from S3 via VPC endpoint — no internet dependency, no NAT cost.
+- Warm invocations score a transaction in ~200ms, well within the 300ms fraud-decision SLA.
+- `batchItemFailures` partial batch response prevents a single bad record from blocking the entire Kinesis shard.
+
+**Negative:**
+- Cold start is ~24 seconds (model load from S3 dominates). This is unacceptable for a latency-sensitive path; mitigated here by the fact that the streaming path is fire-and-forget, not synchronous. For a production deployment, provisioned concurrency would reduce cold start to under 1 second.
+- RDS password is in Lambda environment variables in plain text. Acceptable for a portfolio project; production deployment would use Secrets Manager via a boto3 call in the handler.
+- Kinesis Data Streams is not Free Tier eligible (~$0.015/shard-hour). Stream is deleted between sessions; total project cost estimated under $5.
+
+**What this signals to interviewers:** Understanding the Lambda-in-VPC trade-off (RDS access costs internet access; S3 VPC endpoint resolves this without NAT). Knowing that OCI manifest lists are not supported by Lambda and how to fix it. Measuring and acknowledging cold start rather than hiding it, with a concrete mitigation path (provisioned concurrency).
