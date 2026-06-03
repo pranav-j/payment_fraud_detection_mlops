@@ -36,4 +36,5 @@ exec mlflow server \
   --backend-store-uri "$BACKEND_URI" \
   --default-artifact-root "$MLFLOW_ARTIFACT_ROOT" \
   --host 127.0.0.1 \
-  --port 5000
+  --port 5000 \
+  --allowed-hosts "*"

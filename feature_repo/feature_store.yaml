@@ -5,7 +5,7 @@ registry:
 provider: aws
 online_store:
   type: redis
-  connection_string: "13.207.204.25:6379"
+  connection_string: "13.207.2.104:6379"
 offline_store:
   type: file
 entity_key_serialization_version: 3

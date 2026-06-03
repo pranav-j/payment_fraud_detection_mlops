@@ -30,14 +30,14 @@ FRAUD_TYPES = ["TRANSFER", "CASH_OUT"]  # fraud only occurs in these types
 
 
 def generate_normal_transaction(step: int) -> dict:
-    """Generate a realistic non-fraudulent transaction."""
     txn_type = random.choice(TRANSACTION_TYPES)
-    amount = random.lognormvariate(7.0, 1.5)  # log-normal, ~$1K median
+    amount = random.lognormvariate(7.0, 1.5)
     old_balance = random.lognormvariate(8.0, 2.0)
     new_balance = max(0.0, old_balance - amount)
 
     return {
         "transaction_id": str(uuid.uuid4()),
+        "sender_id": f"C{random.randint(1000000000, 9999999999)}",
         "step": step,
         "type": txn_type,
         "amount": round(amount, 2),
@@ -45,38 +45,23 @@ def generate_normal_transaction(step: int) -> dict:
         "newbalanceOrig": round(new_balance, 2),
         "oldbalanceDest": round(random.lognormvariate(7.0, 2.0), 2),
         "newbalanceDest": round(random.lognormvariate(7.0, 2.0), 2),
-        "sender_txn_count_1h": random.randint(0, 5),
-        "sender_txn_count_24h": random.randint(0, 20),
-        "sender_amount_sum_24h": round(random.lognormvariate(7.0, 1.5), 2),
-        "sender_amount_mean_historical": round(random.lognormvariate(6.5, 1.2), 2),
-        "sender_time_since_last_txn": random.randint(60, 86400),
-        "amount_to_oldbalance_ratio": round(amount / max(old_balance, 1), 4),
-        "drains_origin": 1 if new_balance == 0.0 else 0,
     }
 
 
 def generate_fraud_transaction(step: int) -> dict:
-    """Generate a transaction with classic PaySim fraud signature."""
-    txn_type = random.choice(FRAUD_TYPES)
     old_balance = round(random.lognormvariate(8.5, 1.5), 2)
-    amount = old_balance  # drains entire balance
+    txn_type = random.choice(FRAUD_TYPES)
 
     return {
         "transaction_id": str(uuid.uuid4()),
+        "sender_id": f"C{random.randint(1000000000, 9999999999)}",
         "step": step,
         "type": txn_type,
-        "amount": amount,
+        "amount": old_balance,
         "oldbalanceOrg": old_balance,
         "newbalanceOrig": 0.0,
         "oldbalanceDest": 0.0,
         "newbalanceDest": 0.0,
-        "sender_txn_count_1h": 0,
-        "sender_txn_count_24h": 0,
-        "sender_amount_sum_24h": 0.0,
-        "sender_amount_mean_historical": round(old_balance * 0.05, 2),
-        "sender_time_since_last_txn": random.randint(43200, 86400),
-        "amount_to_oldbalance_ratio": 1.0,
-        "drains_origin": 1,
     }
 
 
