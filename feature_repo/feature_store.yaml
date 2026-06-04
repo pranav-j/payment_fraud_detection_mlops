@@ -1,11 +1,9 @@
 project: fraud_mlops
-registry:
-  registry_type: sql
-  path: postgresql+psycopg://fraud_admin:${RDS_PASSWORD}@fraud-mlops-db.cbuk6e0m0ojk.ap-south-1.rds.amazonaws.com:5432/mlflow?sslmode=require
+registry: s3://fraud-mlops-kidiloski/feast/registry.pb
 provider: aws
 online_store:
   type: redis
-  connection_string: "13.207.2.104:6379"
+  connection_string: "172.30.0.198:6379"
 offline_store:
   type: file
 entity_key_serialization_version: 3
