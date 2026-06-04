@@ -418,6 +418,7 @@ The following table captures the high-level positioning of each major decision:
 | Postgres on RDS | SQL queryability | Doesn't scale horizontally |
 | Fargate (ECS) for serving | Production-grade cloud inference, no laptop dependency | ALB cost accrues even when tasks are stopped |
 | Lambda (Kinesis streaming path) | Event-driven inference, scales to zero | 24s cold start, Kinesis not Free Tier |
+| Feast + Redis (feature store) | Train-serve consistency, 42ms warm latency | Redis IP hardcoded in image, EC2 Redis is a single point of failure |
 
 ---
 
@@ -576,3 +577,57 @@ Deploy the fraud-scorer Lambda as a **container image** (not a zip package) from
 - Kinesis Data Streams is not Free Tier eligible (~$0.015/shard-hour). Stream is deleted between sessions; total project cost estimated under $5.
 
 **What this signals to interviewers:** Understanding the Lambda-in-VPC trade-off (RDS access costs internet access; S3 VPC endpoint resolves this without NAT). Knowing that OCI manifest lists are not supported by Lambda and how to fix it. Measuring and acknowledging cold start rather than hiding it, with a concrete mitigation path (provisioned concurrency).
+
+
+## ADR-016: Feast feature store with Redis online store and S3 registry
+
+**Status:** Accepted
+
+### Context
+
+The fraud-detector model requires five sender-history features (`sender_txn_count_1h`, `sender_txn_count_24h`, `sender_amount_sum_24h`, `sender_amount_mean_historical`, `sender_time_since_last_txn`) that must be computed from historical transaction data. In Weeks 1-6, these were pre-computed during feature engineering and baked into the training dataset — but the Lambda handler received them as part of the Kinesis payload, meaning the producer had to compute them before sending. This is train-serve skew: training uses one computation path, serving uses another.
+
+Week 7 resolves this by introducing Feast as the feature store, with Redis as the online store for sub-50ms lookups during Lambda inference.
+
+### Decision
+
+Deploy Feast 0.63 with:
+
+- **Offline store:** file-based (S3 parquet at `s3://fraud-mlops-kidiloski/feast/paysim_repeat_senders.parquet`)
+- **Online store:** Redis on EC2 t4g.micro (`172.30.0.198:6379`, private IP, same VPC as Lambda)
+- **Registry:** S3 file (`s3://fraud-mlops-kidiloski/feast/registry.pb`)
+- **Entity:** `sender` (PaySim's `nameOrig`, renamed for clarity)
+- **Feature view:** `sender_transaction_features` — the five sender-history features, TTL 7 days
+
+Materialize only the **9,298 repeat senders** (senders with more than one transaction) rather than all 6.35M unique senders. First-time senders have no history to look up; their features default to zeros, which is what the model was trained on for new senders. This reduces Redis memory requirements from ~6GB to ~50MB.
+
+Lambda looks up features by `sender_id` from the Kinesis record. If the sender is not in Redis (unknown/first-time sender), the handler falls back to default zero values and logs `feast_hit=False`. This graceful degradation is intentional — the model handles zero-history senders correctly because PaySim's training data includes many first-time senders.
+
+### Alternatives Considered
+
+1. **SQL registry (Postgres)** — Tried first. Feast connects to Postgres on every `get_online_features` call to validate the registry, adding 1-2 seconds of latency per invocation and causing timeouts when the Lambda VPC couldn't reach RDS reliably. Replaced by S3 file registry which is read once at cold start and cached in memory.
+
+2. **Public IP for Redis** — Tried first. Public IPs change on every EC2 stop/start, requiring an image rebuild each session. Private IP (`172.30.0.198`) is stable within the VPC across stop/start cycles.
+
+3. **Materialize all 6.35M senders** — Attempted. OOM-killed Redis twice, first on t4g.nano (512MB), then on t4g.micro (1GB) when Feast tried to pipeline-write all keys in a single batch. Filtered to repeat senders solves the problem at no cost to model quality.
+
+4. **ElastiCache instead of Redis on EC2** — Rejected on cost. ElastiCache minimum is ~$15/month. EC2 t4g.micro with Redis is Free Tier eligible for 12 months.
+
+5. **Skip Feast, keep pre-computed features in Kinesis payload** — Rejected. Defeats the purpose: train-serve skew remains. Producer would need to replicate feature engineering logic, creating two code paths for the same computation.
+
+### Consequences
+
+**Positive:**
+- Train-serve consistency enforced: features defined once in Feast, served identically to training and inference.
+- Warm Lambda invocation latency dropped to ~42ms (previously ~200ms with pre-computed features in payload).
+- Producer now sends only raw transaction fields — simpler, smaller Kinesis records.
+- Model v2 (`enriched_v1`, threshold 0.4234) trained with proper Feast features achieves 84.5% recall vs 80.4% for v1 — a meaningful improvement at the same precision.
+- Unknown sender fallback is explicit and logged (`feast_hit=False`), making observability straightforward.
+
+**Negative:**
+- Redis IP is hardcoded in `feature_store.yaml` baked into the Lambda image. If the EC2 instance is terminated and recreated, the private IP may change, requiring a rebuild. Mitigated by using private IP (stable across stop/start) rather than public IP.
+- Feast materialization must be re-run when new transaction data is available (handled by Prefect in Week 8).
+- EC2 Redis instance must be running for Lambda to serve Feast features. If Redis is down, Lambda falls back to defaults — predictions still work but without historical features.
+- 9,298 keys covers only repeat senders. In a real production system, the online store would be populated incrementally as new transactions arrive, not batch-materialized from a static dataset.
+
+**What this signals to interviewers:** Understanding train-serve skew and why it matters. Knowing that a feature store's online store must be fast (Redis, not Postgres) and that the registry lookup pattern affects inference latency. Making a deliberate trade-off between completeness (all 6.35M senders) and practicality (9,298 repeat senders with meaningful history), and being able to justify it.
