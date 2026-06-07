@@ -31,6 +31,8 @@ dependencies = [
     "feast[postgres,redis]>=0.63.0",
     "psycopg[binary]>=3.2.5",
     "s3fs==2024.10.0",
+    "prefect>=3.7.2",
+    "redis>=7.4.0",
 ]
 
 [project.optional-dependencies]

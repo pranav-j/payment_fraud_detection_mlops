@@ -3,7 +3,7 @@ registry: s3://fraud-mlops-kidiloski/feast/registry.pb
 provider: aws
 online_store:
   type: redis
-  connection_string: "172.30.0.198:6379"
+  connection_string: "${REDIS_CONNECTION_STRING}"
 offline_store:
   type: file
 entity_key_serialization_version: 3
