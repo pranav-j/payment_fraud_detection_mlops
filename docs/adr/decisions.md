@@ -419,6 +419,7 @@ The following table captures the high-level positioning of each major decision:
 | Fargate (ECS) for serving | Production-grade cloud inference, no laptop dependency | ALB cost accrues even when tasks are stopped |
 | Lambda (Kinesis streaming path) | Event-driven inference, scales to zero | 24s cold start, Kinesis not Free Tier |
 | Feast + Redis (feature store) | Train-serve consistency, 42ms warm latency | Redis IP hardcoded in image, EC2 Redis is a single point of failure |
+| Prefect (local server) | ML pipeline orchestration, retry logic, audit trail | Scheduled flows require Mac to be on; Prefect Cloud free tier doesn't support hybrid pools |
 
 ---
 
@@ -631,3 +632,65 @@ Lambda looks up features by `sender_id` from the Kinesis record. If the sender i
 - 9,298 keys covers only repeat senders. In a real production system, the online store would be populated incrementally as new transactions arrive, not batch-materialized from a static dataset.
 
 **What this signals to interviewers:** Understanding train-serve skew and why it matters. Knowing that a feature store's online store must be fast (Redis, not Postgres) and that the registry lookup pattern affects inference latency. Making a deliberate trade-off between completeness (all 6.35M senders) and practicality (9,298 repeat senders with meaningful history), and being able to justify it.
+
+
+## ADR-017: Prefect for ML pipeline orchestration with local server
+
+**Status:** Accepted
+
+### Context
+
+Three ML pipelines need scheduled, monitored, and retryable execution:
+feature materialization (daily), model retraining (weekly), and drift
+detection (hourly, Week 9). Running these as cron jobs or notebooks would
+work functionally but provides no observability, no retry logic, and no
+audit trail of past runs.
+
+### Decision
+
+Use **Prefect** for orchestration with a **local server** (`prefect server
+start` at `http://localhost:4200`) and a **process work pool**
+(`fraud-mlops-pool`). Flows are deployed via `flows/deploy.py` using
+`prefect.serve()` which registers deployments and serves them from the
+local process.
+
+Two flows deployed:
+- `feast-materialization` — daily at 2am, refreshes Redis from S3 parquet
+- `model-retraining` — weekly Sundays at 2am, retrains XGBoost and promotes
+  if recall improves >2% at precision ≥0.95
+
+### Alternatives Considered
+
+1. **Prefect Cloud free tier** — Rejected. Does not support hybrid or push
+   work pools. Would require managed execution on Prefect's infrastructure,
+   losing control over the execution environment.
+2. **Apache Airflow** — Rejected for this project. Heavier setup (separate
+   scheduler, webserver, worker processes), DAG-file model less ergonomic
+   for ML workflows. Airflow has higher industry recognition at large
+   enterprises; noted in README as the recommended swap for >100 flows in
+   production.
+3. **Cron + bash scripts** — Rejected. No retry logic, no observability, no
+   failure alerting, no audit trail of past runs.
+4. **AWS Step Functions** — Rejected. Amazon States Language adds friction
+   vs Python decorators; cloud-provider lock-in; less transferable knowledge.
+
+### Consequences
+
+**Positive:**
+- `@flow` and `@task` decorators add minimal boilerplate to existing Python.
+- Every run logged to UI with task-level status, logs, and duration.
+- Retry logic declarative: `@task(retries=2, retry_delay_seconds=30)`.
+- Retraining gate correctly skips promotion when new model doesn't improve
+  recall by ≥2% — demonstrated in first run (v2 retained over new candidate).
+- Absolute paths passed via deployment parameters solve the working-directory
+  problem when Prefect worker runs flows from a different cwd than the shell.
+
+**Negative:**
+- Local server only runs when developer's Mac is on. Scheduled flows won't
+  execute if the machine is asleep. For production, the Prefect worker would
+  move to an always-on EC2 instance.
+- `REDIS_CONNECTION_STRING` env var must be updated when Redis EC2 public IP
+  changes (on every stop/start). Mitigated by using private IP inside Lambda
+  and public IP only for local Mac-originated flows.
+- Prefect's `serve()` pattern blocks the terminal; deployment process must
+  stay running for scheduled flows to execute.
