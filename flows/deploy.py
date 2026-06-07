@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from detect_drift import detect_drift_flow
 from materialize_features import materialize_features_flow
 from prefect import serve
 from retrain_model import retrain_model_flow
@@ -26,3 +27,15 @@ if __name__ == "__main__":
     )
 
     serve(materialize_deployment, retrain_deployment)
+
+
+drift_deployment = detect_drift_flow.to_deployment(
+    name="hourly-drift-detection",
+    cron="0 * * * *",  # every hour
+    description="Detect feature drift in recent predictions vs training baseline",
+    parameters={
+        "parquet_path": str(PROJECT_ROOT / "data/interim/paysim_with_features.parquet"),
+    },
+)
+
+serve(materialize_deployment, retrain_deployment, drift_deployment)

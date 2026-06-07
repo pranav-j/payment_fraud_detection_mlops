@@ -33,6 +33,7 @@ dependencies = [
     "s3fs==2024.10.0",
     "prefect>=3.7.2",
     "redis>=7.4.0",
+    "evidently>=0.7.21",
 ]
 
 [project.optional-dependencies]
