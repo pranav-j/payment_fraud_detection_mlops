@@ -420,6 +420,7 @@ The following table captures the high-level positioning of each major decision:
 | Lambda (Kinesis streaming path) | Event-driven inference, scales to zero | 24s cold start, Kinesis not Free Tier |
 | Feast + Redis (feature store) | Train-serve consistency, 42ms warm latency | Redis IP hardcoded in image, EC2 Redis is a single point of failure |
 | Prefect (local server) | ML pipeline orchestration, retry logic, audit trail | Scheduled flows require Mac to be on; Prefect Cloud free tier doesn't support hybrid pools |
+| Evidently + Prometheus + Grafana + SNS | Full monitoring stack, drift detection, alerting | Local Docker for monitoring services; not always-on |
 
 ---
 
@@ -694,3 +695,89 @@ Two flows deployed:
   and public IP only for local Mac-originated flows.
 - Prefect's `serve()` pattern blocks the terminal; deployment process must
   stay running for scheduled flows to execute.
+
+
+## ADR-018: Full monitoring stack — Evidently, Prometheus, Grafana, SNS
+
+**Status:** Accepted
+
+### Context
+
+A deployed fraud model needs monitoring on two dimensions: (1) are the
+inputs drifting from the training distribution, and (2) are we alerted
+quickly enough to act? Without monitoring, a model can silently degrade
+for days before anyone notices — the classic production ML failure mode.
+
+### Decision
+
+Deploy a four-component monitoring stack:
+
+- **Evidently 0.7.x** — computes drift metrics comparing recent decisions
+  against the PaySim training baseline. Runs as a Prefect flow hourly.
+  Generates HTML reports saved to `s3://fraud-mlops-kidiloski/drift-reports/`.
+- **Prometheus + Pushgateway** — Evidently metrics are pushed to
+  Pushgateway after each flow run. Prometheus scrapes Pushgateway every
+  15 seconds. Both run as local Docker containers.
+- **Grafana** — three-panel dashboard: drift share time series, drift
+  status (DRIFT DETECTED / OK with color mapping), and drifted columns
+  count. Runs as a local Docker container at `localhost:3000`.
+- **SNS** — email alert fires when `drift_share > 0.3` (more than 30%
+  of monitored columns drifting). Topic:
+  `fraud-mlops-drift-alerts` in `ap-south-1`.
+
+Drift is computed on `amount` and `type` columns — the features most
+likely to shift with real fraud pattern changes. Reference dataset is
+5,000 randomly sampled rows from the PaySim training parquet.
+
+### Alternatives Considered
+
+1. **WhyLabs / Arize / Fiddler** — Commercial managed monitoring
+   platforms. Rejected on cost and portability. Evidently is open-source,
+   self-hosted, and the most widely-known ML monitoring library; knowledge
+   transfers across employers.
+2. **CloudWatch metrics instead of Prometheus** — Native AWS, no extra
+   infrastructure. Rejected because Prometheus + Grafana is the industry
+   standard for ML monitoring dashboards, and demonstrating it is more
+   transferable than CloudWatch-specific knowledge.
+3. **Grafana Cloud instead of local Grafana** — Free tier exists.
+   Rejected to keep all monitoring co-located and avoid another external
+   account dependency.
+4. **Alerting via Grafana instead of SNS** — Grafana has built-in
+   alerting. Rejected because SNS is already in the AWS stack and adding
+   Grafana alerting adds complexity without benefit. SNS also integrates
+   with Lambda, PagerDuty, and other downstream systems more naturally.
+
+### Consequences
+
+**Positive:**
+- End-to-end monitoring story: drift detected → metrics in Prometheus →
+  visible in Grafana → SNS alert sent. Demonstrated with injected drift
+  (100x normal transaction amounts).
+- HTML reports persisted in S3 provide an audit trail of every drift
+  check run.
+- Prefect handles scheduling, retries, and observability of the drift
+  flow itself.
+- `fraud_detector_drift_detected` Gauge allows Grafana alerting rules
+  to be added later without changing the flow.
+
+**Negative:**
+- Prometheus, Pushgateway, and Grafana run as local Docker containers —
+  they're not in AWS and not always-on. For production, these would run
+  on EC2 or ECS. Deliberately deferred: the monitoring *code* is
+  production-ready; the *deployment* of the monitoring infrastructure
+  is out of scope for this project.
+- Drift is computed on `amount` and `type` only — not on all 14 model
+  features. Full feature monitoring would require all features to be
+  logged in the decisions table, which they currently aren't.
+- Reference dataset is static (PaySim training data). In production,
+  the reference would be updated periodically to account for legitimate
+  distribution shifts.
+
+**What this signals to interviewers:** Understanding that monitoring is
+not optional in production ML — it's the mechanism that closes the
+feedback loop. Choosing Evidently over custom drift code because
+reinventing statistical tests (PSI, KS, chi-squared) is wheel-reinvention.
+Knowing the difference between data drift detection (Evidently) and
+model performance monitoring (requires ground-truth labels from the
+decisions table once fraud is confirmed) — and being honest that the
+project currently only does the former.
