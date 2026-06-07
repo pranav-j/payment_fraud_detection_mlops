@@ -83,6 +83,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "notebooks/*" = ["E402", "F401"]  # notebooks have flexible import order
 "src/fraud_mlops/data.py" = ["N806"]  # X is sklearn convention for feature matrix
+"flows/*.py" = ["N803", "N806"]
 
 [tool.mypy]
 python_version = "3.11"
