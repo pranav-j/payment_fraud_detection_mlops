@@ -6,9 +6,13 @@ sender features from the S3 parquet offline store.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 
+from dotenv import load_dotenv
 from prefect import flow, get_run_logger, task
+
+load_dotenv()
 
 
 @task(retries=2, retry_delay_seconds=30)
@@ -80,8 +84,8 @@ def verify_feature_lookup(repo_path: str, sample_sender: str) -> dict:
 
 @flow(name="feast-materialization", log_prints=True)
 def materialize_features_flow(
+    redis_host: str = os.environ.get("REDIS_CONNECTION_STRING", "172.30.0.198:6379").split(":")[0],
     repo_path: str = "feature_repo",
-    redis_host: str = "172.30.0.198",
 ) -> None:
     """Daily flow: refresh Redis online store from S3 parquet offline store."""
     logger = get_run_logger()
