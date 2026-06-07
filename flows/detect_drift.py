@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from evidently import DataDefinition, Dataset, Report
 from evidently.presets import DataDriftPreset
 from prefect import flow, get_run_logger, task
+from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
 load_dotenv()
 
@@ -147,6 +148,41 @@ Time: {datetime.utcnow().isoformat()}
     return True
 
 
+@task
+def push_metrics_to_prometheus(metrics: dict) -> None:
+    """Push drift metrics to Prometheus Pushgateway."""
+    logger = get_run_logger()
+
+    registry = CollectorRegistry()
+
+    drift_share = Gauge(
+        "fraud_detector_drift_share",
+        "Share of drifted columns vs training baseline",
+        registry=registry,
+    )
+    drift_share.set(metrics.get("drift_share", 0.0))
+
+    drifted_columns = Gauge(
+        "fraud_detector_drifted_columns_count", "Number of drifted columns", registry=registry
+    )
+    drifted_columns.set(metrics.get("n_drifted_columns", 0))
+
+    drift_detected = Gauge(
+        "fraud_detector_drift_detected",
+        "1 if dataset drift detected, 0 otherwise",
+        registry=registry,
+    )
+    drift_detected.set(1 if metrics.get("dataset_drift_detected") else 0)
+
+    pushgateway_url = os.environ.get("PUSHGATEWAY_URL", "localhost:9091")
+
+    try:
+        push_to_gateway(pushgateway_url, job="fraud-drift-detection", registry=registry)
+        logger.info("Metrics pushed to Prometheus Pushgateway at %s", pushgateway_url)
+    except Exception as e:
+        logger.warning("Failed to push metrics to Pushgateway: %s", e)
+
+
 @flow(name="drift-detection", log_prints=True)
 def detect_drift_flow(
     parquet_path: str = "data/interim/paysim_with_features.parquet",
@@ -164,6 +200,7 @@ def detect_drift_flow(
 
     metrics = run_drift_report(reference=reference, current=current)
     send_alert_if_drift(metrics=metrics)
+    push_metrics_to_prometheus(metrics=metrics)
     logger.info("Drift detection complete.")
 
 
