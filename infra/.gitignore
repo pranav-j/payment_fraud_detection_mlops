@@ -1,0 +1,3 @@
+infra/terraform.tfvars
+infra/.terraform/
+infra/*.tfstate*

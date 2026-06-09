@@ -89,3 +89,7 @@ mlflow.db-journal
 mlflow_data/mlruns/
 mlflow_data/mlflow.db
 mlflow_data/mlflow.db-journal
+infra/terraform.tfvars
+infra/tfplan
+infra/.terraform/
+infra/.terraform.lock.hcl
