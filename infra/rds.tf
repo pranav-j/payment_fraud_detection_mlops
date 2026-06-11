@@ -34,10 +34,6 @@ resource "aws_security_group" "rds" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  lifecycle {
-    ignore_changes = [description, tags]
-  }
-
   tags = { Name = "${var.project}-rds-sg" }
 }
 
@@ -63,13 +59,6 @@ resource "aws_db_instance" "main" {
   tags = { Name = "${var.project}-db" }
 
   lifecycle {
-    prevent_destroy = true
-    ignore_changes = [
-      engine_version,
-      parameter_group_name,
-      ca_cert_identifier,
-      latest_restorable_time,
-      password,
-    ]
+    prevent_destroy = false
   }
 }
