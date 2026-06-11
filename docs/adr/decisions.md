@@ -781,3 +781,91 @@ Knowing the difference between data drift detection (Evidently) and
 model performance monitoring (requires ground-truth labels from the
 decisions table once fraud is confirmed) — and being honest that the
 project currently only does the former.
+
+
+
+
+
+## ADR-019: Terraform IaC for full AWS stack
+
+**Status:** Accepted
+
+### Context
+
+By Week 10, all AWS infrastructure had been created manually over 9 weeks
+of iterative development. While the stack worked, it existed only as a
+collection of manually-clicked console actions and CLI commands with no
+reproducibility guarantee. A new environment couldn't be provisioned
+without repeating every manual step. Terraform was introduced to codify
+the entire stack as version-controlled, reproducible infrastructure.
+
+### Decision
+
+Use **Terraform** (v1.15.5) with:
+- **S3 backend** (`fraud-mlops-kidiloski/terraform/state.tfstate`) for
+  remote state
+- **DynamoDB locking** (`fraud-mlops-terraform-locks`) for concurrent
+  apply protection
+- **14 HCL files** covering all resource types: VPC/security groups, RDS,
+  ECR, ECS, ALB, Lambda, Kinesis, IAM, Secrets Manager, SNS, CloudWatch,
+  Redis EC2, S3 (data source)
+- **`prevent_destroy`** lifecycle on ECR repos (contain Docker images) and
+  initially on RDS
+- **S3 and ECR as protected resources** — never destroyed, only managed
+
+The full destroy/apply cycle was executed to prove reproducibility:
+`terraform destroy` (staged) → `terraform apply` → full stack rebuilt
+from scratch in ~15 minutes.
+
+### Alternatives Considered
+
+1. **AWS CDK** — Rejected. Python-native but generates CloudFormation
+   underneath; less transferable knowledge than HCL since most
+   infrastructure jobs ask for Terraform specifically.
+2. **Pulumi** — Rejected. Smaller ecosystem, fewer job postings referencing
+   it vs Terraform.
+3. **CloudFormation** — Rejected. AWS-specific, verbose YAML/JSON, less
+   ergonomic than HCL for complex stacks.
+4. **Keep manual setup** — Rejected. Not reproducible, not version-controlled,
+   not demonstrable in interviews.
+
+### Consequences
+
+**Positive:**
+- Entire AWS stack reproducible with `terraform init && terraform apply`.
+- Infrastructure changes are code-reviewed via git, not tribal knowledge.
+- `terraform plan` shows exactly what will change before any apply —
+  critical safety check after the RDS deletion incident (see below).
+- Outputs (`alb_dns_name`, `redis_private_ip`, etc.) eliminate manual
+  endpoint lookups after each apply.
+- Destroy/apply cycle verified: stack rebuilds cleanly in ~15 minutes.
+
+**Negative / Incidents:**
+- **RDS deletion incident:** During the first import attempt, the imported
+  RDS config didn't match the HCL exactly (engine version, description).
+  Terraform decided to replace (destroy + recreate) the RDS instance.
+  The plan showed `Destroying...` but was approved without careful review.
+  All MLflow schema and decisions data was lost. Recovery took ~30 minutes.
+  **Lesson:** Always grep the plan for `destroy` and `must be replaced`
+  before typing `yes` on imported resources.
+- **Lambda zombie ENIs:** After Lambda function deletion, AWS held two VPC
+  ENIs (`ela-attach` type) in `in-use` state for several hours. The Lambda
+  security group couldn't be deleted until the ENIs were released. Mitigated
+  by removing the SG from Terraform state and letting AWS clean it up.
+  This is a known AWS issue with no user-side fix.
+- **Secrets Manager recovery window:** Deleted secrets have a 7-day
+  recovery window by default. Required `--force-delete-without-recovery`
+  flag to immediately recreate a secret with the same name during the
+  destroy/apply cycle.
+- **Import complexity:** 12+ resources required manual import before the
+  first clean apply, each with potential config mismatches. `ignore_changes`
+  lifecycle blocks were used as workarounds, then removed before the full
+  destroy/apply cycle.
+
+**What this signals to interviewers:** Understanding that IaC adoption
+on existing infrastructure is harder than greenfield Terraform. Knowing
+the `prevent_destroy` / `ignore_changes` lifecycle patterns. Being able
+to explain the RDS incident — what went wrong, why, and what the correct
+workflow is (`terraform plan | grep destroy` before every apply on
+imported resources). The zombie ENI issue demonstrates real-world AWS
+edge cases that don't appear in tutorials.
