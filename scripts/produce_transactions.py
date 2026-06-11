@@ -21,7 +21,7 @@ from datetime import datetime
 
 import boto3
 
-STREAM_NAME = "fraud-transactions"
+STREAM_NAME = "fraud-mlops-transactions"
 REGION = "ap-south-1"
 
 # Realistic PaySim feature distributions (from EDA in Week 1)
