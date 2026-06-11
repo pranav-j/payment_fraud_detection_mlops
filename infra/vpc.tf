@@ -41,9 +41,6 @@ resource "aws_security_group" "alb" {
 
   tags = { Name = "${var.project}-alb-sg" }
 
-  lifecycle {
-    ignore_changes = [description, tags]
-  }
 }
 
 # ECS security group
@@ -132,7 +129,4 @@ resource "aws_security_group" "lambda" {
 
   tags = { Name = "${var.project}-lambda-sg" }
 
-  lifecycle {
-    ignore_changes = [description, tags]
-  }
 }

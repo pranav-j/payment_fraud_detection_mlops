@@ -7,6 +7,10 @@ resource "aws_ecr_repository" "mlflow" {
   }
 
   tags = { Name = "${var.project}-mlflow" }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_ecr_repository" "api" {
@@ -18,6 +22,10 @@ resource "aws_ecr_repository" "api" {
   }
 
   tags = { Name = "${var.project}-api" }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_ecr_repository" "lambda" {
@@ -29,4 +37,8 @@ resource "aws_ecr_repository" "lambda" {
   }
 
   tags = { Name = "${var.project}-lambda" }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
