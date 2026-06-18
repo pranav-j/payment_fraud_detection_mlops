@@ -61,7 +61,6 @@ interview.
 
 ### The three data stores
 
-The cleanest way to hold the system in your head is by what each store is *for*.
 
 **S3** holds the big files: the trained model artifacts MLflow produces, the PaySim
 parquet that Feast reads from, the Feast registry, drift-report HTML, and the Terraform
@@ -142,6 +141,25 @@ defined in Terraform. State lives in S3 with native S3 locking (`use_lockfile`),
 `prevent_destroy` guards the resources that hold data or images (S3, ECR). The full
 destroy-and-rebuild cycle was exercised, not just `apply` — including recovering from a
 self-inflicted RDS replacement and AWS's zombie-ENI behaviour, both documented in the ADRs.
+
+### Networking and security
+
+Everything on the data plane — the Lambda, the ECS tasks, the Redis EC2 instance, and
+RDS — runs inside a VPC, and access between components is granted by **referencing
+security groups, not by opening CIDR ranges**. The Lambda's security group is allowed into
+the RDS and Redis security groups on only their service ports, so just the function can
+reach the database and the cache; the data stores carry no `0.0.0.0/0` ingress. The ALB
+sits in its own security group exposing only the HTTP listener.
+
+Because the Lambda runs inside the VPC, it reaches S3 through an **S3 VPC Gateway
+Endpoint** rather than the public internet — keeping that traffic on the AWS backbone and
+avoiding the hourly cost of a NAT Gateway, the usual way VPC-bound compute reaches AWS
+services. The RDS connection URI is held in **Secrets Manager** and injected at runtime,
+never baked into an image or a task definition.
+
+Two production gaps (both in the limitations below): RDS is left publicly accessible — with
+only the developer IP allowed in its security group — for convenience during the build, and
+the ALB serves plain HTTP rather than TLS.
 
 ---
 
@@ -285,6 +303,9 @@ decisions rather than what a real deployment would do:
   concurrency.
 - **No TLS on the ALB.** Acceptable for synthetic data with no PII; production would add an
   ACM certificate and an HTTPS listener (no application code changes required).
+- **RDS is publicly accessible.** Convenient for connecting from a laptop during the build,
+  with only the developer IP allowed in its security group; production would keep it in
+  private subnets and reach it through a bastion or VPN.
 - **Single-AZ RDS, no Multi-AZ.** A zone failure would take the backend offline. A
   production deployment would enable Multi-AZ.
 
