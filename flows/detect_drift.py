@@ -22,8 +22,15 @@ from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
 load_dotenv()
 
-SNS_TOPIC_ARN = "arn:aws:sns:ap-south-1:125773060711:fraud-mlops-drift-alerts"
-S3_BUCKET = "fraud-mlops-kidiloski"
+# Built from the environment rather than hardcoded: an AWS account ID in a
+# public repo is an account detail nobody needs to publish. Set SNS_TOPIC_ARN
+# directly, or AWS_ACCOUNT_ID and let it be assembled.
+SNS_TOPIC_ARN = os.environ.get(
+    "SNS_TOPIC_ARN",
+    f"arn:aws:sns:{os.environ.get('AWS_DEFAULT_REGION', 'ap-south-1')}:"
+    f"{os.environ.get('AWS_ACCOUNT_ID', '')}:fraud-mlops-drift-alerts",
+)
+S3_BUCKET = os.environ.get("S3_BUCKET", "fraud-mlops-kidiloski")
 DRIFT_THRESHOLD = 0.3
 
 
