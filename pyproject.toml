@@ -99,12 +99,7 @@ module = [
     "pandas.*",
     "sklearn.*",
     "xgboost.*",
-    "joblib.*",
-    "evidently.*",
-    "feast.*",
-    "prometheus_client.*",
     "psycopg2.*",
-    "locust.*",
 ]
 ignore_missing_imports = true
 
