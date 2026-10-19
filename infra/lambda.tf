@@ -1,7 +1,7 @@
 resource "aws_lambda_function" "scorer" {
   function_name = "${var.project}-scorer"
   package_type  = "Image"
-  image_uri     = "${aws_ecr_repository.lambda.repository_url}:v5"
+  image_uri     = "${aws_ecr_repository.lambda.repository_url}:v6"
   role          = aws_iam_role.lambda.arn
   architectures = ["arm64"]
   memory_size   = 1024
