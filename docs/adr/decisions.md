@@ -1266,3 +1266,96 @@ demo, 720 (thirty days) for a realistic chargeback window.
 means two different things, that the second one is gated on label latency, and
 that the honest way to handle label latency is to make it explicit in the schema
 rather than to pretend the most recent window is measurable.
+
+---
+
+## ADR-024: The Lambda's cold start is an architecture problem, not a tuning one
+
+**Status:** Accepted (problem recorded; fix not yet implemented)
+
+### Context
+
+The first measurement session (2026-10-19) produced a number the project had
+been quoting wrongly. The README said the Lambda cold start was "~24s on first
+call". Measured, it is **61.4 seconds**, and the reason is more interesting than
+the number.
+
+AWS gives a Lambda function's initialisation phase 10 seconds. This function
+spends that phase importing MLflow, resolving the `@production` alias against
+Postgres, downloading the model artifact from S3 and opening the Feast registry.
+That takes longer than 10 seconds, so the init phase times out:
+
+```
+INIT_REPORT Init Duration: 9999.64 ms  Phase: init  Status: timeout
+```
+
+Lambda then re-runs initialisation *inside the first invocation*. The work is
+not cancelled, it is relocated — which is why that invocation billed 61.4
+seconds and why its `REPORT` line carries no `Init Duration` field at all.
+
+Two consequences, both of which had been invisible:
+
+1. **Observability.** Any tool that identifies cold starts by looking for
+   `Init Duration` reports zero cold starts for precisely the functions with
+   the worst ones. `scripts/lambda_latency.py` did exactly this on its first
+   run, and reported "0 cold, 599 warm" for a function whose cold start is a
+   minute. It now reads `INIT_REPORT` lines.
+2. **Cost and latency.** The init work is billed at the invocation's full
+   memory allocation, and the first record of every new container waits a
+   minute for a decision.
+
+Measured warm, the same function runs in **43.8 ms** (p50 over 825
+invocations). So the cold path is roughly 1,400x the warm path.
+
+### Decision
+
+Record the problem and its cause now; do not reach for provisioned concurrency.
+
+The honest diagnosis is that **the model is being assembled at container start
+from four network dependencies**. Provisioned concurrency would pay AWS to keep
+that slow initialisation permanently warm rather than making it fast, at a cost
+comparable to the rest of the stack combined, for a path that is
+fire-and-forget and has nobody waiting on it.
+
+The fix worth doing, when it is done, is to cut what initialisation has to do:
+
+- **Bake the model artifact into the image.** The retrain flow already knows
+  which version it promoted; it could write the artifact into the image at build
+  time, so the container starts with the model on local disk and the registry
+  lookup becomes a version assertion rather than a download.
+- **Import less.** MLflow is a large import to carry purely to resolve an alias
+  and deserialize a scikit-learn pipeline.
+
+Both are real work and both change how deployment happens, so neither belongs in
+a change whose purpose was measurement.
+
+### Alternatives Considered
+
+1. **Provisioned concurrency** — Rejected for now, on cost, as above. It is the
+   right answer for a latency-sensitive synchronous path; this is not one.
+2. **Raise the init timeout** — Not available. The 10-second init phase is a
+   platform limit, not a function setting.
+3. **More memory to speed up init** — Would help, since Lambda scales CPU with
+   memory, but it raises the cost of every warm invocation to improve one cold
+   one. The warm path is already 43.8 ms.
+4. **Keep quoting "~24s"** — Rejected. It was wrong, and it was wrong in the
+   flattering direction.
+
+### Consequences
+
+**Positive:**
+- The cold-start figure is now measured, reproducible and explained.
+- `scripts/lambda_latency.py` reports the folded-init case explicitly, so this
+  cannot hide again.
+- The fix is scoped: it is about shrinking initialisation, not about buying
+  warmth.
+
+**Negative:**
+- Until the fix lands, every new container costs a minute of billed duration and
+  the first record through it waits that long. At the streaming path's traffic
+  this is rare, but it is the dominant term in the ingest-to-decision tail: p50
+  is 610 ms and p99 is 67.5 s.
+
+**What this signals to interviewers:** reading the platform's own telemetry
+closely enough to notice that a missing field *is* the finding, and separating
+"make the slow thing fast" from "pay to avoid doing the slow thing".

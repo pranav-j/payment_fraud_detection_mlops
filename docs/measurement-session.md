@@ -100,6 +100,12 @@ Watch for, and write down:
 
 ## 4. Screenshots for the README
 
+Bring the dashboards up first — one command, nothing to configure:
+
+```bash
+make monitoring-up      # Grafana on :3000, dashboard already provisioned
+```
+
 Capture to `reports/figures/` with these exact names:
 
 - [ ] `grafana-drift-spike.png` — drift share jumping after `scripts/inject_drift.py`
