@@ -1,0 +1,168 @@
+{
+  "generated_at": "2026-10-19 14:56:47 UTC",
+  "region": "ap-south-1",
+  "pricing_fetched_at": "2026-10-19 14:55:06 UTC",
+  "assumptions": {
+    "kinesis_shards": 1,
+    "transactions_per_second": 5.0,
+    "kinesis_record_bytes": 400,
+    "lambda_memory_mb": 1024,
+    "lambda_batch_size": 10,
+    "lambda_duration_ms_per_batch": 250.0,
+    "lambda_duration_measured": false,
+    "fargate_tasks": [
+      [
+        "mlflow",
+        1.0,
+        2.0
+      ],
+      [
+        "api",
+        0.5,
+        1.0
+      ]
+    ],
+    "api_requests_per_second": 5.0,
+    "api_requests_measured": false,
+    "alb_lcus": 1.0,
+    "s3_gb": 5.0,
+    "ecr_gb": 4.5,
+    "secrets_count": 2,
+    "cloudwatch_gb_per_month": 1.0,
+    "public_ipv4_addresses": 5
+  },
+  "running": [
+    {
+      "component": "RDS (db.t4g.micro, Single-AZ)",
+      "basis": "1 instance x $0.021/hr",
+      "hourly_usd": 0.021,
+      "monthly_usd": 15.33,
+      "idle": false,
+      "note": ""
+    },
+    {
+      "component": "RDS storage (20 GB gp2)",
+      "basis": "20 GB x $0.131/GB-month",
+      "hourly_usd": 0.003589,
+      "monthly_usd": 2.62,
+      "idle": false,
+      "note": "Billed monthly; shown per hour for comparability."
+    },
+    {
+      "component": "EC2 Redis host (t4g.micro)",
+      "basis": "1 instance x $0.0056/hr",
+      "hourly_usd": 0.0056,
+      "monthly_usd": 4.09,
+      "idle": false,
+      "note": ""
+    },
+    {
+      "component": "Application Load Balancer",
+      "basis": "$0.0239/hr + 1.0 LCU x $0.008/LCU-hr",
+      "hourly_usd": 0.0319,
+      "monthly_usd": 23.29,
+      "idle": false,
+      "note": "The single largest hourly line, and the reason the stack is torn down."
+    },
+    {
+      "component": "Kinesis Data Streams",
+      "basis": "1 shard x $0.0175/shard-hr",
+      "hourly_usd": 0.0175,
+      "monthly_usd": 12.78,
+      "idle": false,
+      "note": ""
+    },
+    {
+      "component": "Fargate tasks (ARM)",
+      "basis": "mlflow 1.0 vCPU/2.0 GB, api 0.5 vCPU/1.0 GB at $0.02383/vCPU-hr + $0.00261/GB-hr",
+      "hourly_usd": 0.043575,
+      "monthly_usd": 31.81,
+      "idle": false,
+      "note": ""
+    },
+    {
+      "component": "Kinesis PUT payload units",
+      "basis": "5 txn/s x 3,600 x $1.85e-08/unit",
+      "hourly_usd": 0.000333,
+      "monthly_usd": 0.24,
+      "idle": false,
+      "note": ""
+    },
+    {
+      "component": "Lambda (arm64, streaming scorer)",
+      "basis": "1,800 invocations/hr x 250 ms x 1024 MB",
+      "hourly_usd": 0.00576,
+      "monthly_usd": 4.2,
+      "idle": false,
+      "note": "Duration is an assumption \u2014 no measurement session has run yet."
+    },
+    {
+      "component": "Public IPv4 addresses",
+      "basis": "5 x $0.005/hr",
+      "hourly_usd": 0.025,
+      "monthly_usd": 18.25,
+      "idle": false,
+      "note": "Charged since Feb 2024 for every in-use public IPv4 address."
+    }
+  ],
+  "idle": [
+    {
+      "component": "S3 (artifacts, parquet, drift reports, TF state)",
+      "basis": "5 GB x $0.025/GB-month",
+      "hourly_usd": 0.000171,
+      "monthly_usd": 0.12,
+      "idle": true,
+      "note": ""
+    },
+    {
+      "component": "ECR (three container images)",
+      "basis": "4.5 GB x $0.1/GB-month",
+      "hourly_usd": 0.000616,
+      "monthly_usd": 0.45,
+      "idle": true,
+      "note": "prevent_destroy keeps these across teardowns, by design."
+    },
+    {
+      "component": "Secrets Manager",
+      "basis": "2 secrets x $0.4/month",
+      "hourly_usd": 0.001096,
+      "monthly_usd": 0.8,
+      "idle": true,
+      "note": ""
+    },
+    {
+      "component": "CloudWatch Logs",
+      "basis": "1 GB/month x $0.67/GB ingested",
+      "hourly_usd": 0.000918,
+      "monthly_usd": 0.67,
+      "idle": true,
+      "note": "7-day retention on all three log groups."
+    }
+  ],
+  "per_1k_predictions": {
+    "streaming_marginal_usd": 0.000339,
+    "streaming_fully_loaded_usd": 0.00857,
+    "synchronous_marginal_usd": 0.002579,
+    "streaming_throughput_per_second": 5.0,
+    "api_throughput_per_second": 5.0,
+    "throughput_measured": false,
+    "explanation": "Marginal cost is what one more thousand predictions adds while the stack is already up: for the streaming path that is Kinesis PUT units plus Lambda, and for the synchronous path the Fargate API task plus the ALB. Fully loaded divides the entire running cost of the stack across the streaming throughput, which is the honest number for a system whose cost is almost entirely fixed. The gap between them is the point: at this scale, prediction volume is nearly free and the infrastructure is not."
+  },
+  "totals": {
+    "running_hourly_usd": 0.1543,
+    "running_monthly_usd": 112.61,
+    "idle_hourly_usd": 0.002801,
+    "idle_monthly_usd": 2.04,
+    "total_if_always_on_monthly_usd": 114.65
+  },
+  "measured_inputs": {},
+  "caveats": [
+    "Rates are real (AWS Price List API, ap-south-1, on-demand). Usage figures are assumptions unless explicitly marked as measured.",
+    "Data transfer out to the internet is not modelled. At this volume it is within or near the 100 GB/month free allowance.",
+    "Free-tier allowances are deliberately ignored. They expire, and a cost estimate that depends on them describes a temporary situation.",
+    "Taxes (18% GST in India) are not included.",
+    "The stack is torn down between sessions, so the monthly figure for the running line items is what it *would* cost left on for 730 hours \u2014 not a bill anyone has received.",
+    "Lambda duration is a placeholder. Run scripts/lambda_latency.py after a measurement session and re-run `make cost` to replace it.",
+    "Throughput is a placeholder. The load test in load_test/locustfile.py produces the measured figure."
+  ]
+}

@@ -135,11 +135,177 @@ def find_threshold_for_precision(
     chosen = float(valid_thresholds[best_idx])
 
     logger.info(
-        "Chose threshold=%.4f for min_precision=%.2f → "
-        "actual precision=%.4f, recall=%.4f",
+        "Chose threshold=%.4f for min_precision=%.2f → actual precision=%.4f, recall=%.4f",
         chosen,
         min_precision,
         precision[mask][best_idx],
         recall[mask][best_idx],
     )
     return chosen
+
+
+@dataclass
+class PrSummary:
+    """Threshold-free summary of a precision-recall curve."""
+
+    pr_auc: float
+    recall_at_min_precision: float
+    min_precision: float
+
+    def to_dict(self) -> dict[str, float]:
+        return asdict(self)
+
+
+@dataclass
+class ConfidenceInterval:
+    """A bootstrap percentile interval."""
+
+    point: float
+    low: float
+    high: float
+    level: float
+    n_resamples: int
+
+    def to_dict(self) -> dict[str, float | int]:
+        return asdict(self)
+
+    def __str__(self) -> str:
+        return f"{self.point:.4f} [{self.low:.4f}, {self.high:.4f}]"
+
+
+def _grouped_curve_inputs(
+    y_true: np.ndarray,
+    y_proba: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Sort by score descending and collapse ties into groups.
+
+    Returns `(group_starts, y_sorted)`, where `group_starts` indexes the first
+    row of each distinct score. Collapsing ties matters: a model that gives
+    1,000 rows the same score cannot discriminate between them, and splitting
+    them across thresholds would quietly inflate the curve.
+    """
+    order = np.argsort(-y_proba, kind="stable")
+    p_sorted = y_proba[order]
+    y_sorted = y_true[order].astype(np.int64)
+
+    # First index of each run of equal scores.
+    is_new = np.empty(len(p_sorted), dtype=bool)
+    is_new[0] = True
+    np.not_equal(p_sorted[1:], p_sorted[:-1], out=is_new[1:])
+    group_starts = np.flatnonzero(is_new)
+
+    return group_starts, y_sorted
+
+
+def _curve_from_weights(
+    group_starts: np.ndarray,
+    y_sorted: np.ndarray,
+    weights: np.ndarray | None,
+    min_precision: float,
+) -> tuple[float, float]:
+    """Average precision and recall-at-min-precision for one (re)sample.
+
+    `weights` is the multiplicity of each row — `None` means every row counts
+    once, which is the point estimate.
+    """
+    if weights is None:
+        positives = np.add.reduceat(y_sorted, group_starts)
+        totals = np.diff(np.append(group_starts, len(y_sorted)))
+    else:
+        positives = np.add.reduceat(weights * y_sorted, group_starts)
+        totals = np.add.reduceat(weights, group_starts)
+
+    tp = np.cumsum(positives)
+    seen = np.cumsum(totals)
+    total_positives = tp[-1]
+
+    if total_positives == 0:
+        return 0.0, 0.0
+
+    precision = tp / np.maximum(seen, 1)
+    recall = tp / total_positives
+
+    # Average precision: sum of precision weighted by the gain in recall.
+    average_precision = float(np.sum(np.diff(recall, prepend=0.0) * precision))
+
+    eligible = precision >= min_precision
+    recall_at_floor = float(recall[eligible].max()) if eligible.any() else 0.0
+
+    return average_precision, recall_at_floor
+
+
+def summarize_pr_curve(
+    y_true: np.ndarray,
+    y_proba: np.ndarray,
+    min_precision: float = 0.95,
+) -> PrSummary:
+    """PR-AUC and the best recall available at or above `min_precision`.
+
+    Both are threshold-free properties of the ranking. `recall_at_min_precision`
+    is an upper bound on what any threshold could achieve on *this* data — it
+    is not what the deployed threshold delivers, because that threshold was
+    chosen on the validation set. Report both; they answer different questions.
+    """
+    group_starts, y_sorted = _grouped_curve_inputs(y_true, y_proba)
+    pr_auc, recall_at_floor = _curve_from_weights(group_starts, y_sorted, None, min_precision)
+    return PrSummary(
+        pr_auc=pr_auc,
+        recall_at_min_precision=recall_at_floor,
+        min_precision=min_precision,
+    )
+
+
+def bootstrap_pr_summary(
+    y_true: np.ndarray,
+    y_proba: np.ndarray,
+    min_precision: float = 0.95,
+    n_resamples: int = 1000,
+    level: float = 0.95,
+    seed: int = 42,
+) -> dict[str, ConfidenceInterval]:
+    """Percentile bootstrap intervals for PR-AUC and recall-at-min-precision.
+
+    Resamples rows with replacement `n_resamples` times. With ~4,000 fraud cases
+    in a test split, the interval on recall is a couple of points wide — which
+    is the point of reporting it: a 1-point difference between two models is
+    not a difference.
+
+    Implementation note: the rows are sorted by score once, and each resample is
+    drawn as a multiplicity vector over those sorted rows. That keeps every
+    resample to a handful of linear passes instead of a re-sort.
+    """
+    if n_resamples < 1:
+        raise ValueError(f"n_resamples must be >= 1, got {n_resamples}")
+
+    group_starts, y_sorted = _grouped_curve_inputs(y_true, y_proba)
+    point_pr_auc, point_recall = _curve_from_weights(group_starts, y_sorted, None, min_precision)
+
+    n = len(y_sorted)
+    rng = np.random.default_rng(seed)
+    pr_aucs = np.empty(n_resamples)
+    recalls = np.empty(n_resamples)
+
+    for i in range(n_resamples):
+        # Multiplicities of a with-replacement resample of n rows. Rows are
+        # exchangeable under the draw, so these can be used directly against
+        # the score-sorted arrays without a reindex.
+        weights = np.bincount(rng.integers(0, n, size=n), minlength=n).astype(np.int64)
+        pr_aucs[i], recalls[i] = _curve_from_weights(group_starts, y_sorted, weights, min_precision)
+
+    tail = (1.0 - level) / 2.0 * 100.0
+    return {
+        "pr_auc": ConfidenceInterval(
+            point=point_pr_auc,
+            low=float(np.percentile(pr_aucs, tail)),
+            high=float(np.percentile(pr_aucs, 100 - tail)),
+            level=level,
+            n_resamples=n_resamples,
+        ),
+        "recall_at_min_precision": ConfidenceInterval(
+            point=point_recall,
+            low=float(np.percentile(recalls, tail)),
+            high=float(np.percentile(recalls, 100 - tail)),
+            level=level,
+            n_resamples=n_resamples,
+        ),
+    }

@@ -1440,7 +1440,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "redis", specifier = ">=7.4.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.0,<0.16" },
     { name = "s3fs", specifier = "==2024.10.0" },
     { name = "scikit-learn", specifier = ">=1.4.0" },
     { name = "seaborn", specifier = ">=0.13.0" },

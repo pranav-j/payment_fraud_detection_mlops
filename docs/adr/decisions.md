@@ -869,3 +869,400 @@ to explain the RDS incident — what went wrong, why, and what the correct
 workflow is (`terraform plan | grep destroy` before every apply on
 imported resources). The zombie ENI issue demonstrates real-world AWS
 edge cases that don't appear in tutorials.
+
+---
+
+## ADR-020: Build the arm64 images on native arm64 runners, not under QEMU
+
+**Status:** Accepted
+
+### Context
+
+Every container image in this project ships to an arm64 target. The Lambda
+function sets `architectures = ["arm64"]` and builds `FROM
+public.ecr.aws/lambda/python:3.12-arm64`; both Fargate task definitions set
+`cpu_architecture = "ARM64"`. Graviton was chosen for the usual reason — it is
+roughly 20% cheaper than x86 for the same work — and on a project whose whole
+cost story is "keep idle spend near zero", that matters.
+
+CI has to build those images to prove they still build. A GitHub-hosted
+`ubuntu-latest` runner is x86_64, so building an arm64 image there needs either
+cross-architecture emulation or a different runner.
+
+The images are not trivial to build. The Lambda image installs `xgboost`,
+`scikit-learn`, `feast[redis]`, `psycopg2-binary` and `s3fs`; the FastAPI image
+compiles wheels in a builder stage. Those are exactly the workloads emulation is
+worst at.
+
+### Decision
+
+Build all three images on GitHub's **native arm64 runner**, `ubuntu-24.04-arm`,
+in a matrix job. CI builds only — it never pushes, because pushing to ECR would
+require AWS credentials in the workflow and this workflow deliberately has none.
+
+The runner label is free for public repositories, which this one is. The build
+job also uses the GitHub Actions cache (`type=gha`) per image, so unchanged
+dependency layers are not rebuilt on every push.
+
+### Alternatives Considered
+
+1. **QEMU emulation via `docker/setup-qemu-action` on `ubuntu-latest`** —
+   Rejected. It works, and it is the right answer for a private repo with no
+   arm64 runner allowance, but emulated builds of native-extension wheels run
+   roughly 5–10x slower. A CI job that takes fifteen minutes instead of two is a
+   job people stop waiting for.
+2. **Build x86_64 images in CI and arm64 only when deploying** — Rejected. CI
+   would then be green on an image that is not the image production runs. The
+   failures this job exists to catch — a wheel with no arm64 build, a base image
+   that moved — are precisely the ones an x86 build would miss.
+3. **Self-hosted arm64 runner** — Rejected. An always-on runner costs more per
+   month than the entire idle AWS footprint, for a repository that gets a
+   handful of pushes a week.
+4. **Switch the whole stack to x86_64 so CI is simple** — Rejected. That is
+   letting the CI tail wag the architecture dog, and it gives up the Graviton
+   price difference permanently.
+
+### Consequences
+
+**Positive:**
+- CI builds bit-for-bit the same architecture production runs.
+- Build times stay in the low minutes, so the check is one people actually read.
+- No QEMU setup step, and no emulation-only flakiness to debug.
+
+**Negative:**
+- Depends on the repository staying public. If it ever goes private, this job
+  either needs a paid arm64 runner or has to fall back to QEMU — one line in
+  `.github/workflows/ci.yml` plus a `setup-qemu-action` step.
+- `ubuntu-24.04-arm` is a distinct runner image from `ubuntu-latest`; its
+  preinstalled tooling can differ. The job installs what it needs rather than
+  assuming.
+
+**What this signals to interviewers:** knowing that "it builds in CI" is only
+meaningful if CI builds the artifact you actually deploy, and that
+cross-architecture builds have a real cost that is worth choosing deliberately
+rather than copying from a template.
+
+---
+
+## ADR-021: Evaluation protocol — time split, validation-tuned threshold, bootstrap intervals
+
+**Status:** Accepted
+
+### Context
+
+The numbers this project reported for most of its life came from the modelling
+notebooks, and the notebooks had four problems that all pushed in the same
+direction — making the model look better than it was.
+
+1. **The split was by row index, not by time.** `time_based_split` sorted by
+   `step` and cut at 80% of *rows*. Because PaySim's volume is heavily
+   front-loaded, 80% of rows is only about 48% of hours, and the simulated hour
+   at the boundary landed partly in train and partly in test.
+2. **There was no validation set.** Notebook 02 says so in as many words: "For
+   this notebook we'll use the test set for simplicity." The decision threshold
+   was therefore chosen on the same rows it was then reported from, which makes
+   the reported recall an optimistic estimate of a threshold nobody could have
+   picked in advance.
+3. **A single point estimate, no interval.** v1's 80.4% and v2's 84.5% were
+   quoted as though the 4-point gap were a result.
+4. **No PR-AUC.** Recall and precision at one threshold describe one point on a
+   curve. Without the area, there was no way to tell whether a model was better
+   or merely cut at a different place.
+
+Separately, PaySim's balance columns were never examined, despite the EDA
+notebook noticing the "balance signature of fraud" and then moving on.
+
+### Decision
+
+One protocol, in `src/fraud_mlops/evaluate.py`, run by `make evaluate`, applied
+identically to every model and written to `reports/metrics/evaluation.json`.
+Every number in the README traces to that file.
+
+- **Three-way split by time, on whole steps.** Train on the earliest hours,
+  validate on the next block, test on the latest. `time_based_split_three_way`
+  snaps each boundary to a step boundary, so no simulated hour is divided.
+- **Tune on validation, report on test.** The threshold maximises recall subject
+  to precision >= 95% on the validation split only.
+- **Report both numbers that "recall at 95% precision" could mean.** The
+  threshold-free value from the test curve (an upper bound, found with
+  hindsight) *and* the recall actually delivered at the validation-chosen
+  threshold. The gap between them is the cost of not being able to tune on the
+  future, and it is large.
+- **Percentile bootstrap intervals**, 1,000 resamples, for PR-AUC and for recall
+  at 95% precision.
+- **A ladder of baselines on the same splits:** a hand-written amount rule,
+  logistic regression, XGBoost on v1 features, XGBoost on v2 features.
+- **A random split reported as a secondary comparison**, because
+  `flows/retrain_model.py` uses one, so the inflation it causes is visible
+  rather than implied.
+- **An explicit leakage experiment:** the same model with and without the four
+  balance columns and the two features derived from them, next to a
+  three-condition hand rule that uses nothing else.
+- **Fixed seed, local MLflow file store.** The evaluation logs runs to
+  `mlruns_evaluation/`, never to the tracking server and never to the registry.
+  Evaluating is not promoting.
+
+### Alternatives Considered
+
+1. **Keep the notebook numbers and just add PR-AUC** — Rejected. The split and
+   the threshold tuning were the larger problems; adding a metric to a broken
+   protocol produces a better-documented wrong answer.
+2. **Cross-validation instead of a single time split** — Rejected for the
+   headline numbers. K-fold on shuffled data reintroduces exactly the temporal
+   leakage the time split exists to prevent. Rolling-origin backtesting would be
+   the right generalisation and is the obvious next step; a single honest split
+   was the thing missing, and it is what the README claims.
+3. **Analytic confidence intervals** — Rejected. There is no clean closed form
+   for recall-at-a-precision-floor, and the bootstrap costs about nine seconds
+   per model.
+4. **Drop the balance columns from the production feature set outright** —
+   Not taken here. That is a modelling change, and this ADR is about
+   *measuring*. The measurement is now on the record, which is what any decision
+   to change the features would have to start from.
+
+### Consequences
+
+**Positive:**
+- Every published number is reproducible with one command from a committed
+  script, and the JSON is the single source of truth.
+- The v1-vs-v2 comparison is now answerable. Under this protocol the enriched
+  feature set improves PR-AUC by a margin whose intervals do not overlap
+  (0.9523 → 0.9752) but improves recall at 95% precision by 0.75 points, with
+  intervals that overlap almost entirely (82.8% [81.3, 84.0] → 83.6% [81.9,
+  84.8]). At the deployed threshold the two are indistinguishable.
+- The leakage experiment is unambiguous. A three-condition hand rule on the
+  balance columns reaches 97.4% recall at 100% precision — better than any
+  model in the table — and removing those columns drops the production
+  configuration from 0.975 PR-AUC to 0.215.
+
+**Negative:**
+- The honest numbers are worse than the ones they replace, and the headline
+  claim that the feature store is what lifted recall no longer survives contact
+  with a confidence interval. The README now says so.
+- `make evaluate` takes about three minutes on the full dataset. A
+  `--sample-frac` flag exists for quick checks and is clearly labelled as not
+  for reporting.
+- The validation split has a much lower fraud rate (0.061%) than the test split
+  (0.329%), an artifact of where PaySim puts its fraud in time. The threshold
+  tuned on it is conservative on test — precision comes out at 99.3% where only
+  95% was required, giving up roughly nine points of recall. That is a real
+  property of a time-split deployment and is now visible rather than hidden.
+
+**What this signals to interviewers:** knowing that the evaluation protocol is
+where most model claims actually fail, being able to say which direction each
+flaw biased the result, and being willing to publish the number that came out
+worse. The leakage experiment in particular is the difference between "my model
+gets 97% recall on PaySim" and understanding what PaySim is.
+
+---
+
+## ADR-022: Bound how long a warm Lambda may serve a superseded model
+
+**Status:** Accepted
+
+### Context
+
+An audit of how a newly promoted `@production` model actually reaches the two
+serving paths found this:
+
+**Lambda.** `lambda/handler.py` calls `load_production_detector()` at module
+import. In Lambda, module import happens once per *container*, during the init
+phase. So the alias is resolved exactly once, at cold start, and the resolved
+version is then held in a module global for the life of that container. Nothing
+re-checks it. AWS recycles idle containers on its own schedule — typically
+minutes under no traffic, but a container under steady load can live for hours.
+
+The consequence: after the retrain flow moves the `@production` alias, there is
+no bounded time by which traffic is being scored by the new model. Old and new
+containers serve side by side, and the only thing that ends it is AWS deciding
+to recycle. Worse, the `decisions` table records `model_version` per row, so the
+audit log faithfully records two different models deciding concurrently with
+nothing explaining why.
+
+**Fargate.** `src/fraud_mlops/api.py` loads the model in the FastAPI lifespan
+hook, so it resolves once at task start. The ECS service pins an image tag and
+nothing triggers a new deployment after promotion, so the API serves whatever
+version was current when its task last started — indefinitely, since a healthy
+task is never replaced.
+
+Neither path was wrong by accident. Loading a model per request would be
+absurd. But "resolve once, forever" is not the only alternative.
+
+### Decision
+
+Add a **time-to-live on the resolved model** in the Lambda handler.
+`MODEL_TTL_SECONDS` (default 900, i.e. 15 minutes) bounds how long a container
+may serve a cached detector before it re-resolves the alias. Setting it to 0
+restores the previous cold-start-only behaviour.
+
+The re-check happens at most once per TTL per container, not per record, so the
+steady-state cost is one registry lookup and one artifact load every fifteen
+minutes per live container. If the lookup fails, the handler logs it, keeps
+serving the cached model, and resets the clock — a registry blip must not stop
+fraud scoring.
+
+For **Fargate**, no code change. The deployment is documented as requiring
+`aws ecs update-service --force-new-deployment` after a promotion, which is the
+honest description of what the system does today.
+
+### Alternatives Considered
+
+1. **Leave it as-is and document it** — Rejected for Lambda. "The model updates
+   when AWS feels like recycling the container" is not a property anyone can
+   reason about, and the whole point of an alias-based registry is a controlled
+   rollout.
+2. **Resolve the alias on every invocation** — Rejected. A registry round-trip
+   plus an artifact load per record would dominate the latency budget entirely,
+   and it makes the registry a hard dependency of every single decision.
+3. **Have the retrain flow force a Lambda update after promotion** (e.g.
+   updating an environment variable, which replaces all containers) — This is
+   the better production answer, and it is what a real deployment should do: it
+   makes rollout immediate and deterministic instead of eventually-consistent.
+   Not taken here because the retrain flow runs on a laptop and would need
+   `lambda:UpdateFunctionConfiguration`, widening the blast radius of a
+   developer credential for a benefit the TTL already mostly delivers. Recorded
+   as the next step rather than done.
+4. **Provisioned concurrency with a deployment hook** — Rejected on cost. It is
+   the right answer for a latency-sensitive path and this one is
+   fire-and-forget.
+
+### Consequences
+
+**Positive:**
+- Stale-model exposure is bounded and configurable, rather than
+  unbounded and invisible.
+- The version change is logged explicitly when it happens
+  (`Model version changed after 920s: v3 -> v4`), so the mixed-version period
+  in the `decisions` table has a matching log line.
+- The TTL is infrastructure config, so it can be tuned per environment without
+  a code change.
+
+**Negative:**
+- A promotion still takes up to `MODEL_TTL_SECONDS` to reach every container.
+  This is eventual consistency with a known bound, not immediate rollout.
+- Each re-resolution costs an artifact download in the middle of a batch, which
+  shows up as an occasional latency spike on the records that happen to land
+  during it. Visible in the `decisions.latency_ms` distribution as a thin tail;
+  acceptable because nothing waits on the streaming path.
+- Fargate remains manual. A promotion does not reach the API until someone
+  forces a new deployment.
+
+**What this signals to interviewers:** knowing that a model registry's alias is
+only as useful as the mechanism that propagates it, and being able to say
+exactly where a system is eventually consistent, with what bound, and what it
+would take to make it immediate.
+
+---
+
+## ADR-023: Measure realized performance against delayed labels
+
+**Status:** Accepted
+
+### Context
+
+The monitoring stack watched data drift and nothing else. Evidently compared the
+distribution of recent `decisions` rows against the training baseline, pushed a
+drift share to Prometheus, and alerted when it crossed a threshold.
+
+That answers "has the input data changed?" It cannot answer "is the model still
+catching fraud?", and those come apart in exactly the case that matters: a
+fraud pattern that shifts *within* the existing input distribution. Fraudsters
+adapting to a deployed model produce transactions that look ordinary — that is
+the adaptation. Drift stays flat; recall collapses.
+
+The obstacle to measuring recall is that fraud labels are late. A chargeback or
+a dispute arrives days to weeks after the transaction. The `decisions` table
+holds predictions; there was no outcome anywhere in the system.
+
+Two ways to get this wrong, both worse than not measuring at all:
+
+- **Treat a missing label as "not fraud."** Join `decisions` to a labels table
+  with a left join and recall looks excellent on the newest window — the one an
+  operator looks at first — because nothing has been labelled as fraud yet.
+- **Treat "no labels yet" as "recall is zero."** The newest window is always
+  unmatured, so the alert fires every single night and gets muted within a week.
+
+### Decision
+
+Two tables, a replay script, a daily flow, and a rule about what may be alerted
+on.
+
+**`ground_truth`** holds what the simulator knows, written by the producer at
+send time. **`labels`** holds what the business has been *told*, with an
+explicit `label_available_at`. `scripts/replay_labels.py` moves rows from the
+first to the second once `LABEL_DELAY_HOURS` have elapsed since the decision,
+stamping maturity as `scored_at + delay` so the data is identical whether the
+script runs every minute or once a day.
+
+The split is the design. The performance flow can only read `labels`, and only
+rows whose `label_available_at` has passed, so it is structurally incapable of
+seeing an outcome before the business would have.
+
+**`flows/monitor_performance.py`** runs daily (not hourly — labels arrive on
+the order of days), joins matured labels to decisions, computes realized
+precision and recall per 24-hour window, pushes to Prometheus and alerts via
+SNS. All the logic lives in `fraud_mlops.performance` as pure functions over
+dataframes, so window boundaries, the maturity join and the alert rule are unit
+tested without a database.
+
+**What may be alerted on.** A window alerts only when it has at least 50 matured
+labels *and* at least 10 matured fraud cases *and* realized recall is below the
+floor. Precision and recall are `None` rather than `0.0` when there is nothing
+to compute them from, and the flow skips the Prometheus gauge entirely rather
+than pushing a zero that a dashboard would draw as a collapse.
+
+**Two clocks, stated explicitly.** PaySim's `step` is a simulated hour and never
+advances in real time. The replay runs on wall-clock time, so
+`LABEL_DELAY_HOURS` is real hours since the decision: 0.05 (three minutes) for a
+demo, 720 (thirty days) for a realistic chargeback window.
+
+### Alternatives Considered
+
+1. **Reuse the drift flow and add a label join** — Rejected. The drift flow runs
+   hourly against a fixed lookback; performance needs a different cadence, a
+   different window definition and a different alert rule. Sharing them would
+   have meant one flow with two unrelated modes.
+2. **Proxy metrics instead of labels** — e.g. tracking the alert rate or the
+   mean predicted probability. These move for many reasons other than model
+   quality and cannot distinguish "fraud went down" from "the model stopped
+   seeing it". Useful as a leading indicator, not as a measure of correctness.
+   The score distribution is already visible through the drift panels.
+3. **One table with a nullable label** — Rejected. A nullable column invites
+   exactly the left-join bug this design exists to prevent, and it conflates
+   "we do not know yet" with "we know it was not fraud".
+4. **Alert on a statistical test rather than a fixed floor** — A sequential test
+   would catch a slow decline sooner than a threshold. Rejected for now: with
+   tens of matured fraud cases per window, the test would spend most of its time
+   underpowered, and a floor is something an on-call person can reason about at
+   3am.
+
+### Consequences
+
+**Positive:**
+- The system can now detect a failure mode that data drift is blind to, which is
+  demonstrated rather than asserted: `scripts/demo_performance_drop.py` shifts
+  the fraud pattern to small amounts that leave a balance behind, drift stays
+  flat, and realized recall collapses once the labels mature.
+- The Grafana dashboard leads with realized performance and shows the
+  "not yet matured" share beside it, so the blind spot is visible instead of
+  being implied by a flat line.
+- The maturity delay is a first-class concept in the data model rather than an
+  operational caveat in a README.
+
+**Negative:**
+- **The delay is real and cannot be engineered away.** Detection of a pattern
+  shift lags the shift by the label delay plus a window. In production that is
+  weeks. Monitoring cannot be the only control; this is an argument for
+  retaining data drift, not an argument against it.
+- Ground truth depends on the producer recording it. A transaction scored from
+  any other source has no label and is silently excluded from the metrics — the
+  replay script reports that count, but nothing enforces it.
+- The thresholds (50 labels, 10 positives, 70% recall floor) are judgement
+  calls, not derived from a power calculation. They are config, and the demo
+  fraud rate is set well above PaySim's real 0.13% so a few minutes of traffic
+  clears them.
+
+**What this signals to interviewers:** understanding that "monitor your model"
+means two different things, that the second one is gated on label latency, and
+that the honest way to handle label latency is to make it explicit in the schema
+rather than to pretend the most recent window is measurable.

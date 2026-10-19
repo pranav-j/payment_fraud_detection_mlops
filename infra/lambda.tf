@@ -14,22 +14,25 @@ resource "aws_lambda_function" "scorer" {
 
   environment {
     variables = {
-      RDS_HOST              = aws_db_instance.main.address
-      RDS_PORT              = "5432"
-      RDS_DB                = "mlflow"
-      RDS_USER              = "fraud_admin"
-      RDS_PASSWORD          = var.db_password
-      MLFLOW_TRACKING_URI   = "postgresql+psycopg://fraud_admin:${var.db_password}@${aws_db_instance.main.address}:5432/mlflow?sslmode=require"
+      RDS_HOST                = aws_db_instance.main.address
+      RDS_PORT                = "5432"
+      RDS_DB                  = "mlflow"
+      RDS_USER                = "fraud_admin"
+      RDS_PASSWORD            = var.db_password
+      MLFLOW_TRACKING_URI     = "postgresql+psycopg://fraud_admin:${var.db_password}@${aws_db_instance.main.address}:5432/mlflow?sslmode=require"
       REDIS_CONNECTION_STRING = "${aws_instance.redis.private_ip}:6379"
+      # Bound how long a warm container may serve a superseded @production
+      # model. 0 disables the re-check. See ADR-022.
+      MODEL_TTL_SECONDS = tostring(var.model_ttl_seconds)
     }
   }
 }
 
 resource "aws_lambda_event_source_mapping" "kinesis" {
-  event_source_arn              = aws_kinesis_stream.transactions.arn
-  function_name                 = aws_lambda_function.scorer.arn
-  starting_position             = "LATEST"
-  batch_size                    = 10
+  event_source_arn               = aws_kinesis_stream.transactions.arn
+  function_name                  = aws_lambda_function.scorer.arn
+  starting_position              = "LATEST"
+  batch_size                     = 10
   bisect_batch_on_function_error = true
 }
 
