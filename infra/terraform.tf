@@ -9,11 +9,11 @@ terraform {
   }
 
   backend "s3" {
-    bucket         = "fraud-mlops-kidiloski"
-    key            = "terraform/state.tfstate"
-    region         = "ap-south-1"
+    bucket       = "fraud-mlops-kidiloski"
+    key          = "terraform/state.tfstate"
+    region       = "ap-south-1"
     use_lockfile = true
-    encrypt        = true
+    encrypt      = true
   }
 }
 

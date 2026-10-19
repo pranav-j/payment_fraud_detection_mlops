@@ -16,7 +16,15 @@ from mlflow.tracking import MlflowClient
 from prefect import flow, get_run_logger, task
 from sklearn.metrics import precision_recall_curve
 
+from fraud_mlops.features import ENRICHED_FEATURE_COLUMNS
+from fraud_mlops.promotion import MIN_RECALL_IMPROVEMENT, PRECISION_FLOOR, evaluate_gate
+from fraud_mlops.training import build_xgb_pipeline, compute_scale_pos_weight
+
 load_dotenv()
+
+# This flow trains with 100 estimators where the registered production model
+# used 200. Kept as-is rather than silently retuned; see CLAUDE.md non-goals.
+RETRAIN_N_ESTIMATORS = 100
 
 
 @task
@@ -27,22 +35,7 @@ def load_training_data(parquet_path: str) -> tuple[pd.DataFrame, pd.Series]:
     df = pd.read_parquet(parquet_path)
     logger.info("Loaded %d rows from %s", len(df), parquet_path)
 
-    feature_cols = [
-        "step",
-        "type",
-        "amount",
-        "oldbalanceOrg",
-        "newbalanceOrig",
-        "oldbalanceDest",
-        "newbalanceDest",
-        "sender_time_since_last_txn",
-        "sender_amount_mean_historical",
-        "sender_txn_count_1h",
-        "sender_txn_count_24h",
-        "sender_amount_sum_24h",
-        "amount_to_oldbalance_ratio",
-        "drains_origin",
-    ]
+    feature_cols = ENRICHED_FEATURE_COLUMNS
 
     X = df[feature_cols]
     y = df["isFraud"]
@@ -82,11 +75,7 @@ def get_current_production_metrics() -> dict:
 @task(retries=1, retry_delay_seconds=30)
 def train_and_evaluate(X: pd.DataFrame, y: pd.Series) -> dict:
     """Train XGBoost model and evaluate with calibrated threshold."""
-    import xgboost as xgb
-    from sklearn.compose import ColumnTransformer
     from sklearn.model_selection import train_test_split
-    from sklearn.pipeline import Pipeline
-    from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
     logger = get_run_logger()
 
@@ -95,31 +84,15 @@ def train_and_evaluate(X: pd.DataFrame, y: pd.Series) -> dict:
     )
     logger.info("Train: %d rows, Test: %d rows", len(X_train), len(X_test))
 
-    numeric_cols = [c for c in X.columns if c != "type"]
-    categorical_cols = ["type"]
-
-    preprocessor = ColumnTransformer(
-        [
-            ("num", StandardScaler(), numeric_cols),
-            ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_cols),
-        ]
-    )
-
-    model = Pipeline(
-        [
-            ("preprocessor", preprocessor),
-            (
-                "classifier",
-                xgb.XGBClassifier(
-                    scale_pos_weight=(y_train == 0).sum() / (y_train == 1).sum(),
-                    n_estimators=100,
-                    max_depth=6,
-                    learning_rate=0.1,
-                    random_state=42,
-                    eval_metric="aucpr",
-                ),
-            ),
-        ]
+    # tree_method/n_jobs are passed as None so this flow keeps XGBoost's own
+    # defaults, exactly as it did before the pipeline builder was shared. Only
+    # the duplication is gone; the candidate model is unchanged.
+    model = build_xgb_pipeline(
+        feature_columns=list(X.columns),
+        scale_pos_weight=compute_scale_pos_weight(y_train),
+        n_estimators=RETRAIN_N_ESTIMATORS,
+        tree_method=None,
+        n_jobs=None,
     )
 
     logger.info("Training model...")
@@ -161,38 +134,29 @@ def train_and_evaluate(X: pd.DataFrame, y: pd.Series) -> dict:
 def register_and_promote_if_better(
     results: dict,
     current_metrics: dict,
-    min_recall_improvement: float = 0.02,
+    min_recall_improvement: float = MIN_RECALL_IMPROVEMENT,
 ) -> bool:
     """Register model in MLflow and promote if better than current production."""
     logger = get_run_logger()
 
-    recall_improvement = results["recall"] - current_metrics["recall"]
-    precision_ok = results["precision"] >= 0.95
-
-    logger.info(
-        "Recall improvement: %.4f (need %.4f). Precision ok: %s",
-        recall_improvement,
-        min_recall_improvement,
-        precision_ok,
+    decision = evaluate_gate(
+        candidate_precision=results["precision"],
+        candidate_recall=results["recall"],
+        production_recall=current_metrics["recall"],
+        precision_floor=PRECISION_FLOOR,
+        min_recall_improvement=min_recall_improvement,
     )
+    logger.info("Promotion gate: %s", decision.reason)
 
-    if not precision_ok:
-        logger.info("New model does not meet precision threshold. Skipping promotion.")
-        return False
-
-    if recall_improvement < min_recall_improvement:
-        logger.info(
-            "Recall improvement %.4f < threshold %.4f. Skipping promotion.",
-            recall_improvement,
-            min_recall_improvement,
-        )
+    if not decision.promote:
+        logger.info("Gate refused promotion. Production alias unchanged.")
         return False
 
     # Register in MLflow
     with mlflow.start_run(run_name=f"retrain_{datetime.utcnow().strftime('%Y%m%d')}"):
         mlflow.log_params(
             {
-                "n_estimators": 100,
+                "n_estimators": RETRAIN_N_ESTIMATORS,
                 "max_depth": 6,
                 "learning_rate": 0.1,
             }
@@ -252,7 +216,7 @@ def register_and_promote_if_better(
 @flow(name="model-retraining", log_prints=True)
 def retrain_model_flow(
     parquet_path: str = "data/interim/paysim_with_features.parquet",
-    min_recall_improvement: float = 0.02,
+    min_recall_improvement: float = MIN_RECALL_IMPROVEMENT,
 ) -> None:
     """Weekly flow: retrain fraud-detector and promote if better."""
     logger = get_run_logger()

@@ -1,5 +1,7 @@
 # Real-Time UPI Fraud Detection — MLOps Pipeline
 
+[![CI](https://github.com/pranav-j/payment_fraud_detection_mlops/actions/workflows/ci.yml/badge.svg)](https://github.com/pranav-j/payment_fraud_detection_mlops/actions/workflows/ci.yml)
+
 An end-to-end MLOps pipeline that takes a fraud-detection model from notebook to a
 production-shaped system on AWS: streaming inference, a feature store with
 online/offline parity, drift monitoring with alerting, scheduled retraining, and the
