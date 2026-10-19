@@ -21,6 +21,9 @@ interview.
 - **0.975 PR-AUC**, **83.6% recall at 95% precision** (95% CI 81.9–84.8%), measured on
   the latest 389 simulated hours — 1,293,523 transactions, 4,258 of them fraudulent — with
   the threshold tuned on a separate earlier validation window, never on the test set.
+- **110 ms p50** on the synchronous path at 42 req/s with zero errors, and **43.8 ms**
+  warm Lambda duration on the streaming path — measured against the live stack, not
+  estimated.
 - **$0.15/hour** to run the whole stack, **$2.04/month** torn down, computed from live
   `ap-south-1` rates pulled from the AWS Price List API.
 - **A three-condition hand rule beats every model here** — 97.4% recall at 100% precision —
@@ -202,8 +205,13 @@ far more than raw accuracy). The registered versions are:
 
 | Registry version | Feature set | Threshold | Tagged recall | Tagged precision |
 |---|---|---|---|---|
-| v1, v2 | baseline | 0.9307 | 80.4% | 95.0% |
-| v3 (`@production`) | enriched (Feast historical features) | 0.4234 | 84.5% | 95.0% |
+| v1 | baseline | 0.9307 | 80.4% | 95.0% |
+| v2 (`@production`) | enriched (Feast historical features) | 0.4234 | 84.5% | 95.0% |
+
+Confirmed against the live RDS-backed registry on 2026-10-19; the API served
+`model_version: 2` through the ALB. (A stale local SQLite store on the dev
+machine has a third version and points `@production` at it — the cloud registry
+is the one that counts.)
 
 Those are the tags carried on the model versions themselves, and they are **not** the
 numbers to judge the model by. They came from a protocol that tuned the threshold on the
@@ -388,6 +396,19 @@ That lag is not a flaw in the implementation. It is the honest cost of
 outcome-based monitoring, and it is the argument for keeping drift detection
 rather than replacing it.
 
+> **Run on real infrastructure 2026-10-19, the demo did not demonstrate its own
+> premise.** The plumbing all worked — producer, Lambda, ground truth, label
+> replay, maturity join, windowing, the alert rule — but the shifted fraud
+> profile failed to evade the model: recall was *higher* in the shifted phase
+> (100%, n=86) than in the PaySim-style phase (71%, n=45), with poor precision
+> in both. Two causes, in
+> [`reports/perf/2026-10-19/demo_result.json`](reports/perf/2026-10-19/demo_result.json):
+> Feast was never materialised in that session, so every sender lookup missed
+> and every transaction was scored with default history features; and the model
+> over-flags this synthetic traffic generally, which makes "caught" cheap. The
+> scenario needs rework before it proves anything. Recording it rather than
+> quietly dropping it, because a demo that has not been run is not a demo.
+
 ### How a promoted model actually reaches the serving paths
 
 Worth being precise about, because "the registry has an alias" says nothing
@@ -445,28 +466,51 @@ infrastructure is not.
 
 ### Latency
 
-The instrumentation is in place and the measurement session has not been run:
+Measured 2026-10-19 against the live stack in `ap-south-1`. Raw output is in
+[`reports/perf/2026-10-19/`](reports/perf/2026-10-19/).
 
-- `decisions.ingested_at` and `decisions.latency_ms` record ingest-to-decision
-  latency per transaction, from Kinesis `ApproximateArrivalTimestamp`
-- `scripts/streaming_latency.py` reports p50/p95/p99 over that column
-- `scripts/lambda_latency.py` parses CloudWatch `REPORT` lines and reports cold
-  and warm invocations as separate populations, because they are separate
-  distributions rather than one with a tail
-- `load_test/locustfile.py` drives the FastAPI `/predict` endpoint with varied
-  realistic payloads
+**Synchronous path** — Locust against the ALB, 2 minutes at each level, from a
+laptop in India to Mumbai:
 
-`docs/measurement-session.md` is the checklist and
-`scripts/measurement_session.sh` the runner. Results land in
-`reports/perf/<date>/`.
+| Target | Achieved | p50 | p95 | p99 | Failures |
+|---:|---:|---:|---:|---:|---:|
+| 5 req/s | 4.4 | 110 ms | 380 ms | 690 ms | 0 |
+| 20 req/s | 17.3 | 110 ms | 410 ms | 930 ms | 0 |
+| 50 req/s | 42.1 | 110 ms | 420 ms | 1,600 ms | 0 |
 
-<!-- TODO: fill in from reports/perf/<date>/ after the measurement session.
-     The only latency figure currently claimed anywhere is the ~24s cold start
-     noted under limitations, which came from a one-off observation rather
-     than a measurement. -->
+No errors at any level, and p50 is flat at 110 ms across a tenfold increase in
+load — the 0.5 vCPU task is nowhere near saturation. The load test also hits
+`/health`, which has no model in it and came in at p50 100 ms. So of that
+110 ms, roughly 100 ms is round-trip network and **the model contributes about
+10 ms**. The growing p99 is the tail, not the typical request.
 
-**Not yet measured.** Until that session runs, this project makes no latency
-claim beyond the cold-start observation in the limitations section.
+**Streaming path** — 1,200 transactions at 10/s through Kinesis and Lambda:
+
+| Measurement | p50 | p95 | p99 |
+|---|---:|---:|---:|
+| Ingest to decision (Kinesis receipt → row committed) | 610 ms | 40.6 s | 67.5 s |
+| Lambda duration, warm (825 invocations) | 43.8 ms | 58.0 ms | 130.2 ms |
+| Lambda duration, cold (1 invocation) | 61.4 s | — | — |
+
+The streaming tail is entirely the cold start. Warm, the function runs in
+43.8 ms and the whole pipeline commits a decision in 610 ms.
+
+**The cold start is worse than this project used to claim, and for an
+interesting reason.** Lambda allows an initialisation phase 10 seconds. Loading
+MLflow, resolving the `@production` alias, pulling the model artifact from S3
+and opening the Feast registry takes longer, so the init phase *times out*:
+
+```
+INIT_REPORT Init Duration: 9999.64 ms  Phase: init  Status: timeout
+```
+
+Lambda then re-runs initialisation inside the first invocation, which is why
+that invocation billed **61.4 seconds** and its `REPORT` line carries no
+`Init Duration` at all. Any tool that identifies cold starts by looking for
+`Init Duration` — including the first version of
+[`scripts/lambda_latency.py`](scripts/lambda_latency.py) — reports zero cold
+starts for exactly the functions with the worst ones. It now reads
+`INIT_REPORT` lines too.
 
 ---
 
@@ -595,9 +639,13 @@ decisions rather than what a real deployment would do:
 - **Prefect and the monitoring stack run locally.** The flows and Prometheus/Grafana
   execute on a developer machine and reach out to AWS; production would host them on
   always-on infrastructure so schedules fire without a laptop.
-- **Lambda cold start (~24s on first call) is unoptimised.** Acceptable because the
-  streaming path is fire-and-forget; a latency-sensitive inline path would use provisioned
-  concurrency.
+- **Lambda cold start is 61 seconds, not the ~24s previously claimed.** Measured
+  2026-10-19. The init phase times out at Lambda's 10-second limit and the work restarts
+  inside the first invocation (see [Performance and cost](#performance-and-cost)).
+  Acceptable only because the streaming path is fire-and-forget; a latency-sensitive path
+  would need provisioned concurrency, or a smaller init — loading the model from a baked-in
+  artifact rather than resolving it through MLflow at startup would be the first thing to
+  try.
 - **No TLS on the ALB.** Acceptable for synthetic data with no PII; production would add an
   ACM certificate and an HTTPS listener (no application code changes required).
 - **RDS is publicly accessible.** Convenient for connecting from a laptop during the build,
