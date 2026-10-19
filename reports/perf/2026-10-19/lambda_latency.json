@@ -1,0 +1,79 @@
+{
+  "generated_at": "2026-10-19T16:48:32.446056+00:00",
+  "log_group": "/aws/lambda/fraud-mlops-scorer",
+  "window_start": "2026-10-19T13:48:30.857437+00:00",
+  "window_end": "2026-10-19T16:48:30.857437+00:00",
+  "invocations": 826,
+  "cold_starts": 1,
+  "cold_starts_with_init_duration": 0,
+  "cold_starts_with_init_timeout": 1,
+  "init_reports": 1,
+  "init_timeouts": 1,
+  "init_timeout_ms": 9999.64,
+  "warm_invocations": 825,
+  "cold_start_share": 0.0012106537530266344,
+  "memory_size_mb": 1024,
+  "max_memory_used_mb": 590,
+  "durations": [
+    {
+      "population": "all",
+      "count": 826,
+      "p50_ms": 43.75,
+      "p95_ms": 58.05,
+      "p99_ms": 130.98,
+      "min_ms": 31.67,
+      "max_ms": 61412.07,
+      "mean_ms": 120.06
+    },
+    {
+      "population": "warm",
+      "count": 825,
+      "p50_ms": 43.75,
+      "p95_ms": 57.98,
+      "p99_ms": 130.25,
+      "min_ms": 31.67,
+      "max_ms": 291.07,
+      "mean_ms": 45.77
+    },
+    {
+      "population": "cold (handler only)",
+      "count": 0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "p99_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "mean_ms": null
+    },
+    {
+      "population": "cold (init only)",
+      "count": 0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "p99_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "mean_ms": null
+    },
+    {
+      "population": "cold (init + handler)",
+      "count": 0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "p99_ms": null,
+      "min_ms": null,
+      "max_ms": null,
+      "mean_ms": null
+    },
+    {
+      "population": "cold (init timed out, folded into invoke)",
+      "count": 1,
+      "p50_ms": 61412.07,
+      "p95_ms": 61412.07,
+      "p99_ms": 61412.07,
+      "min_ms": 61412.07,
+      "max_ms": 61412.07,
+      "mean_ms": 61412.07
+    }
+  ]
+}

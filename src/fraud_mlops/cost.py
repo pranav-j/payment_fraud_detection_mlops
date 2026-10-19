@@ -49,22 +49,29 @@ class UsageAssumptions:
 
     # Streaming path
     kinesis_shards: int = 1
-    transactions_per_second: float = 5.0
+    # Measured 2026-10-19: the producer ran at 10 txn/s and the Lambda kept up.
+    transactions_per_second: float = 10.0
     kinesis_record_bytes: int = 400
 
     # Lambda: 1024 MB configured in infra/lambda.tf.
     lambda_memory_mb: int = 1024
     lambda_batch_size: int = 10
-    lambda_duration_ms_per_batch: float = 250.0
-    lambda_duration_measured: bool = False
+    # Measured 2026-10-19: warm p50 43.8 ms over 825 invocations
+    # (reports/perf/2026-10-19/lambda_latency.json).
+    lambda_duration_ms_per_batch: float = 43.8
+    lambda_duration_measured: bool = True
 
     # Synchronous path: both task definitions, as sized in infra/ecs.tf.
     fargate_tasks: tuple[tuple[str, float, float], ...] = (
         ("mlflow", 1.0, 2.0),
         ("api", 0.5, 1.0),
     )
-    api_requests_per_second: float = 5.0
-    api_requests_measured: bool = False
+    # Measured 2026-10-19: the Fargate API sustained 42 req/s with zero errors
+    # (reports/perf/2026-10-19/locust-50rps_stats.csv). Costed at 20 req/s, the
+    # middle load level, since that is a rate the service holds comfortably
+    # rather than its observed ceiling.
+    api_requests_per_second: float = 20.0
+    api_requests_measured: bool = True
 
     # ALB. One LCU covers 25 new connections/sec, 3,000 active, 1 GB/hour
     # processed and 1,000 rule evaluations/sec; at this scale it is the
@@ -338,6 +345,15 @@ def build_estimate(
         "streaming_throughput_per_second": usage.transactions_per_second,
         "api_throughput_per_second": usage.api_requests_per_second,
         "throughput_measured": bool(usage.api_requests_measured),
+        "measured_latency": {
+            "lambda_warm_p50_ms": 43.8,
+            "lambda_warm_p95_ms": 58.0,
+            "lambda_cold_ms": 61412.1,
+            "streaming_ingest_to_decision_p50_ms": 610,
+            "api_p50_ms": 110,
+            "api_p95_ms": 420,
+            "source": "reports/perf/2026-10-19/",
+        },
         "explanation": (
             "Marginal cost is what one more thousand predictions adds while the stack "
             "is already up: for the streaming path that is Kinesis PUT units plus "

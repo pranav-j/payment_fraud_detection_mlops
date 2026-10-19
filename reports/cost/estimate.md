@@ -1,6 +1,6 @@
 # Cost estimate
 
-**This is an estimate.** Generated 2026-10-19 14:56:47 UTC by `make cost` from `reports/cost/pricing-inputs.json`, which `scripts/fetch_pricing.py` pulled from the AWS Price List API on 2026-10-19 14:55:06 UTC for `ap-south-1`.
+**This is an estimate.** Generated 2026-10-19 16:49:07 UTC by `make cost` from `reports/cost/pricing-inputs.json`, which `scripts/fetch_pricing.py` pulled from the AWS Price List API on 2026-10-19 14:55:06 UTC for `ap-south-1`.
 
 Every **rate** below is real and carries its AWS SKU in the pricing-inputs file. Every **usage** figure is an assumption unless marked measured — those are listed in full at the bottom.
 
@@ -8,11 +8,11 @@ Every **rate** below is real and carries its AWS SKU in the pricing-inputs file.
 
 | | Hourly | Monthly (730 h) |
 |---|---:|---:|
-| **Stack running** | $0.1543 | $112.61 |
+| **Stack running** | $0.1514 | $110.55 |
 | **Idle (torn down)** | $0.00280 | $2.04 |
-| **If left on permanently** | — | $114.65 |
+| **If left on permanently** | — | $112.60 |
 
-The gap between $113/month and $2.04/month is the entire reason this project tears the stack down between sessions.
+The gap between $111/month and $2.04/month is the entire reason this project tears the stack down between sessions.
 
 ## Running: per hour with the stack up
 
@@ -23,14 +23,14 @@ The gap between $113/month and $2.04/month is the entire reason this project tea
 | Public IPv4 addresses | 5 x $0.005/hr | $0.02500 | $18.25 |
 | RDS (db.t4g.micro, Single-AZ) | 1 instance x $0.021/hr | $0.02100 | $15.33 |
 | Kinesis Data Streams | 1 shard x $0.0175/shard-hr | $0.01750 | $12.78 |
-| Lambda (arm64, streaming scorer) | 1,800 invocations/hr x 250 ms x 1024 MB | $0.00576 | $4.20 |
 | EC2 Redis host (t4g.micro) | 1 instance x $0.0056/hr | $0.00560 | $4.09 |
 | RDS storage (20 GB gp2) | 20 GB x $0.131/GB-month | $0.00359 | $2.62 |
-| Kinesis PUT payload units | 5 txn/s x 3,600 x $1.85e-08/unit | $0.00033 | $0.24 |
+| Lambda (arm64, streaming scorer) | 3,600 invocations/hr x 43.8 ms x 1024 MB | $0.00261 | $1.91 |
+| Kinesis PUT payload units | 10 txn/s x 3,600 x $1.85e-08/unit | $0.00067 | $0.49 |
 
 - **RDS storage (20 GB gp2):** Billed monthly; shown per hour for comparability.
 - **Application Load Balancer:** The single largest hourly line, and the reason the stack is torn down.
-- **Lambda (arm64, streaming scorer):** Duration is an assumption — no measurement session has run yet.
+- **Lambda (arm64, streaming scorer):** Duration measured from CloudWatch.
 - **Public IPv4 addresses:** Charged since Feb 2024 for every in-use public IPv4 address.
 
 ## Idle: with everything torn down
@@ -47,12 +47,12 @@ The gap between $113/month and $2.04/month is the entire reason this project tea
 
 ## Cost per 1,000 predictions
 
-At 5 txn/s streaming and 5 req/s synchronous (**assumed — not yet measured**):
+At 10 txn/s streaming and 20 req/s synchronous (measured):
 
 | Path | Marginal | Fully loaded |
 |---|---:|---:|
-| Streaming (Kinesis + Lambda) | $0.000339 | $0.0086 |
-| Synchronous (ALB + Fargate) | $0.002579 | — |
+| Streaming (Kinesis + Lambda) | $0.000091 | $0.0042 |
+| Synchronous (ALB + Fargate) | $0.000645 | — |
 
 Marginal cost is what one more thousand predictions adds while the stack is already up: for the streaming path that is Kinesis PUT units plus Lambda, and for the synchronous path the Fargate API task plus the ALB. Fully loaded divides the entire running cost of the stack across the streaming throughput, which is the honest number for a system whose cost is almost entirely fixed. The gap between them is the point: at this scale, prediction volume is nearly free and the infrastructure is not.
 
@@ -61,15 +61,15 @@ Marginal cost is what one more thousand predictions adds while the stack is alre
 | Input | Value |
 |---|---|
 | `kinesis_shards` | 1 |
-| `transactions_per_second` | 5.0 |
+| `transactions_per_second` | 10.0 |
 | `kinesis_record_bytes` | 400 |
 | `lambda_memory_mb` | 1024 |
 | `lambda_batch_size` | 10 |
-| `lambda_duration_ms_per_batch` | 250.0 |
-| `lambda_duration_measured` | False |
+| `lambda_duration_ms_per_batch` | 43.8 |
+| `lambda_duration_measured` | True |
 | `fargate_tasks` | [['mlflow', 1.0, 2.0], ['api', 0.5, 1.0]] |
-| `api_requests_per_second` | 5.0 |
-| `api_requests_measured` | False |
+| `api_requests_per_second` | 20.0 |
+| `api_requests_measured` | True |
 | `alb_lcus` | 1.0 |
 | `s3_gb` | 5.0 |
 | `ecr_gb` | 4.5 |
@@ -84,8 +84,6 @@ Marginal cost is what one more thousand predictions adds while the stack is alre
 - Free-tier allowances are deliberately ignored. They expire, and a cost estimate that depends on them describes a temporary situation.
 - Taxes (18% GST in India) are not included.
 - The stack is torn down between sessions, so the monthly figure for the running line items is what it *would* cost left on for 730 hours — not a bill anyone has received.
-- Lambda duration is a placeholder. Run scripts/lambda_latency.py after a measurement session and re-run `make cost` to replace it.
-- Throughput is a placeholder. The load test in load_test/locustfile.py produces the measured figure.
 
 ## Cross-check against an actual bill
 

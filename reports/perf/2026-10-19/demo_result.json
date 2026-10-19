@@ -1,0 +1,28 @@
+{
+  "generated_at": "2026-10-19T16:35:54.280064+00:00",
+  "outcome": "premise not demonstrated",
+  "finding": "The shifted fraud profile did not evade the model. Recall was HIGHER in the shifted phase (100%) than in the PaySim-style phase (71%), with worse precision in both. Two reasons, both of which have to be fixed before this demo means anything: (1) Feast was not materialised in this session, so every sender lookup missed and every transaction was scored with default history features; (2) the model over-flags this synthetic traffic generally, so 'caught' is cheap. The performance flow, the label replay and the maturity join all ran correctly end-to-end on real infrastructure; it is the scenario that needs rework.",
+  "phases": [
+    {
+      "phase": 1,
+      "profile": "paysim",
+      "decisions": 380,
+      "frauds": 45,
+      "caught": 32,
+      "false_positives": 50,
+      "recall": 0.7111,
+      "precision": 0.3902
+    },
+    {
+      "phase": 2,
+      "profile": "shifted",
+      "decisions": 380,
+      "frauds": 86,
+      "caught": 86,
+      "false_positives": 128,
+      "recall": 1.0,
+      "precision": 0.4019
+    }
+  ],
+  "note": "Phases split at the median decision time; each phase is 380 decisions."
+}

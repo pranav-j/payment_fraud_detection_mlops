@@ -1,0 +1,17 @@
+{
+  "session_date": "2026-10-19",
+  "region": "ap-south-1",
+  "alb_dns_name": "fraud-mlops-alb-212676300.ap-south-1.elb.amazonaws.com",
+  "load_levels_rps": [5,20,50],
+  "load_duration": "2m",
+  "producer_rate_per_second": 10,
+  "producer_count": 1200,
+  "instance_sizes": {
+    "rds": "db.t4g.micro, 20 GB gp2, Single-AZ",
+    "redis": "t4g.micro",
+    "fargate_api": "0.5 vCPU / 1 GB, ARM64",
+    "fargate_mlflow": "1 vCPU / 2 GB, ARM64",
+    "lambda": "1024 MB, arm64",
+    "kinesis": "1 shard"
+  }
+}
