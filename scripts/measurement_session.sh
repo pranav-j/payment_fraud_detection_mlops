@@ -200,12 +200,52 @@ cmd_demo() {
   uv run python scripts/demo_performance_drop.py "$@"
 }
 
-cmd_down() {
-  log "Tearing the stack down"
-  review_plan infra/tfplan-destroy -destroy
+# The hourly resources, and only those. A bare `terraform destroy` also takes
+# out aws_db_instance.main — the RDS holding the MLflow registry and the
+# decisions table — and then fails partway through on the ECR repositories,
+# which carry prevent_destroy. That combination is how ADR-019's incident
+# happened. RDS is left alone here; stop it separately if you want to.
+TEARDOWN_TARGETS=(
+  aws_ecs_service.api
+  aws_ecs_service.mlflow
+  aws_lb_listener.http
+  aws_lb_target_group.api
+  aws_lb.main
+  aws_lambda_event_source_mapping.kinesis
+  aws_kinesis_stream.transactions
+)
 
-  confirm "This will DESTROY AWS resources in ${REGION}. S3 and ECR are protected by prevent_destroy; everything else goes."
+cmd_down() {
+  log "Tearing down the hourly resources"
+
+  local target_args=()
+  for t in "${TEARDOWN_TARGETS[@]}"; do target_args+=("-target=$t"); done
+
+  terraform -chdir=infra plan -destroy -input=false "${target_args[@]}" \
+    -out=infra/tfplan-destroy | tail -30
+
+  log "Every destroy line in that plan"
+  terraform -chdir=infra show -no-color infra/tfplan-destroy | grep -E "will be destroyed" || true
+
+  warn "RDS is NOT in this list, on purpose: it holds the MLflow registry and the"
+  warn "decisions table. Destroying it is the ADR-019 incident. Stop it separately"
+  warn "if you want to, with: aws rds stop-db-instance --db-instance-identifier fraud-mlops-db"
+
+  confirm "This will DESTROY the ALB, Kinesis stream and both Fargate services in ${REGION}."
   terraform -chdir=infra apply infra/tfplan-destroy
+
+  log "Stopping the Redis EC2 instance"
+  local rid
+  rid="$(aws ec2 describe-instances --region "$REGION" \
+    --filters "Name=tag:Name,Values=${PROJECT:-fraud-mlops}-redis" \
+              "Name=instance-state-name,Values=running" \
+    --query 'Reservations[0].Instances[0].InstanceId' --output text)"
+  if [[ -n "$rid" && "$rid" != "None" ]]; then
+    aws ec2 stop-instances --region "$REGION" --instance-ids "$rid" \
+      --query 'StoppingInstances[0].CurrentState.Name' --output text
+  else
+    echo "  (no running Redis instance)"
+  fi
 }
 
 cmd_verify() {
