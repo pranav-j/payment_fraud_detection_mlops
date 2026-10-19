@@ -83,6 +83,10 @@ logs/
 
 # MLflow local state
 mlruns/
+# The evaluation script's own local file store (reports/metrics/ IS committed —
+# it is the source of truth for every number in the README; the runs behind it
+# are reproducible with `make evaluate`).
+mlruns_evaluation/
 mlflow.db
 mlflow.db-journal
 

@@ -166,7 +166,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 _write_decision(conn, txn, prediction)
 
                 logger.info(
-                    "Scored transaction %s sender=%s feast_hit=%s " "is_fraud=%s probability=%.4f",
+                    "Scored transaction %s sender=%s feast_hit=%s is_fraud=%s probability=%.4f",
                     txn.get("transaction_id", "unknown"),
                     sender_id,
                     any(v != DEFAULT_FEATURES.get(k) for k, v in sender_features.items()),
