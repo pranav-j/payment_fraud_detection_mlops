@@ -49,13 +49,21 @@ amounts roughly a thousand times normal were pushed through. Cropped as it
 stood then; the provisioned dashboard now leads with realized performance
 instead (see [Observability](#observability)).*
 
-<!-- TODO: two screenshots still to capture. `make monitoring-up` brings Grafana
-     up at localhost:3000 with the dashboard provisioned; run a session per
-     docs/measurement-session.md §4, then add:
+![Realized performance against matured labels](reports/figures/grafana-realized-performance.png)
 
-![Realized performance under label delay](reports/figures/grafana-realized-performance.png)
-![MLflow registry with aliases](reports/figures/mlflow-registry-aliases.png)
--->
+*The performance flow run against the real decision log — 1,700 decisions with
+matured labels, 187 of them fraudulent. Realized recall 82.9% against the 70%
+alert floor, and realized precision 25.9%: the model catches most fraud in this
+traffic and raises a lot of false alarms doing it. The right-hand panel shows
+100% of this window's labels have matured, so none of it is guesswork; the panel
+exists because a window where that reads 0% cannot be judged at all.*
+
+![MLflow registry showing the production alias](reports/figures/mlflow-registry-aliases.png)
+
+*The registry backing all of this. `@production` points at version 2, and the
+threshold and calibration metrics the model is served with travel as tags on the
+version itself — which is how the Lambda and the API both resolve a threshold
+without anyone hardcoding one.*
 
 ---
 
