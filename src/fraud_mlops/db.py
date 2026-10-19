@@ -63,7 +63,10 @@ def connect(**overrides: Any) -> Any:
 
     `sslmode=require` by default: RDS is reachable from outside the VPC in this
     build (a documented limitation), so the connection should at least be
-    encrypted. A local Postgres with no TLS needs `sslmode="prefer"`.
+    encrypted. A local Postgres built without TLS refuses that outright, so
+    `RDS_SSLMODE=prefer` overrides it — which is what the local verification
+    run and the tests use. The default stays strict so that forgetting to set
+    it points at the safe option.
     """
     import psycopg2
 
@@ -73,7 +76,7 @@ def connect(**overrides: Any) -> Any:
         "dbname": os.environ.get("RDS_DB", "mlflow"),
         "user": os.environ.get("RDS_USER"),
         "password": os.environ.get("RDS_PASSWORD"),
-        "sslmode": "require",
+        "sslmode": os.environ.get("RDS_SSLMODE", "require"),
     }
     params.update(overrides)
 

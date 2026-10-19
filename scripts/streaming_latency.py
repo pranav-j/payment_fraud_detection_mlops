@@ -43,7 +43,7 @@ SELECT
     MAX(latency_ms)                                                       AS max_ms,
     AVG(latency_ms)                                                       AS mean_ms
 FROM decisions
-WHERE scored_at > NOW() - make_interval(hours => %(hours)s)
+WHERE scored_at > NOW() - make_interval(secs => %(seconds)s)
 """
 
 # Split by model version too: a version change mid-window is the usual reason
@@ -56,7 +56,7 @@ SELECT
     PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY latency_ms) AS p50_ms,
     PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95_ms
 FROM decisions
-WHERE scored_at > NOW() - make_interval(hours => %(hours)s)
+WHERE scored_at > NOW() - make_interval(secs => %(seconds)s)
   AND latency_ms IS NOT NULL
 GROUP BY model_version
 ORDER BY n DESC
@@ -67,11 +67,12 @@ def collect(hours: float) -> dict:
     conn = connect()
     try:
         with conn.cursor() as cur:
-            cur.execute(SUMMARY_SQL, {"hours": hours})
+            params = {"seconds": hours * 3600.0}
+            cur.execute(SUMMARY_SQL, params)
             columns = [c[0] for c in cur.description]
             summary = dict(zip(columns, cur.fetchone(), strict=True))
 
-            cur.execute(BY_VERSION_SQL, {"hours": hours})
+            cur.execute(BY_VERSION_SQL, params)
             version_columns = [c[0] for c in cur.description]
             by_version = [dict(zip(version_columns, row, strict=True)) for row in cur.fetchall()]
     finally:
