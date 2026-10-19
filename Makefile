@@ -2,7 +2,7 @@
 # Run `make help` to see available commands.
 # Tabs (not spaces!) are required for indentation in Makefiles.
 
-.PHONY: help install install-dev data clean lint format test notebook check evaluate evaluate-quick features cost pricing monitoring-up monitoring-down
+.PHONY: help install install-dev data clean lint format test notebook check evaluate evaluate-quick features cost pricing figures monitoring-up monitoring-down
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -50,6 +50,9 @@ monitoring-up:  ## Start Prometheus + Pushgateway + Grafana (dashboard provision
 
 monitoring-down:  ## Stop the local monitoring stack
 	docker compose -f docker-compose.monitoring.yml down
+
+figures:  ## Regenerate README figures from reports/
+	uv run python -m fraud_mlops.figures
 
 lint:  ## Run linter without fixing
 	uv run ruff check .
