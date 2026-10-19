@@ -48,34 +48,39 @@ def setup_mlflow(
     Returns:
         The active experiment name.
     """
-    experiment_name = experiment_name or os.getenv("MLFLOW_EXPERIMENT", DEFAULT_EXPERIMENT)
+    # Resolve into separate, non-Optional locals. Reassigning the parameters
+    # themselves keeps their declared `str | None` type, which makes every
+    # downstream use look nullable to a type checker.
+    resolved_experiment: str = experiment_name or os.environ.get(
+        "MLFLOW_EXPERIMENT", DEFAULT_EXPERIMENT
+    )
 
-    tracking_uri = tracking_uri or os.getenv(
+    resolved_uri: str = tracking_uri or os.environ.get(
         "MLFLOW_TRACKING_URI",
         f"sqlite:///{DEFAULT_TRACKING_DB}",
     )
 
-    artifact_root = artifact_root or Path(
+    resolved_artifact_root: Path = artifact_root or Path(
         os.getenv("MLFLOW_ARTIFACT_ROOT", str(DEFAULT_ARTIFACT_ROOT))
     )
 
-    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_tracking_uri(resolved_uri)
 
     # Only create local artifact directory if we're using a local file-based
     # tracking URI. When tracking_uri is an HTTP URL (Docker, production),
     # the server owns the artifact store and we have no business creating
     # local directories.
-    if tracking_uri.startswith("sqlite:") or tracking_uri.startswith("file:"):
-        artifact_root.mkdir(parents=True, exist_ok=True)
+    if resolved_uri.startswith("sqlite:") or resolved_uri.startswith("file:"):
+        resolved_artifact_root.mkdir(parents=True, exist_ok=True)
 
     # set_experiment is idempotent — it creates if missing, sets as active if found.
     # The artifact_location is only honored on creation; subsequent calls keep the
     # original location.
-    mlflow.set_experiment(experiment_name=experiment_name)
+    mlflow.set_experiment(experiment_name=resolved_experiment)
 
     logger.info("MLflow configured")
-    logger.info("  tracking_uri = %s", tracking_uri)
-    logger.info("  artifact_root = %s", artifact_root)
-    logger.info("  experiment   = %s", experiment_name)
+    logger.info("  tracking_uri = %s", resolved_uri)
+    logger.info("  artifact_root = %s", resolved_artifact_root)
+    logger.info("  experiment   = %s", resolved_experiment)
 
-    return experiment_name
+    return resolved_experiment

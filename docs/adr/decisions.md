@@ -869,3 +869,75 @@ to explain the RDS incident — what went wrong, why, and what the correct
 workflow is (`terraform plan | grep destroy` before every apply on
 imported resources). The zombie ENI issue demonstrates real-world AWS
 edge cases that don't appear in tutorials.
+
+---
+
+## ADR-020: Build the arm64 images on native arm64 runners, not under QEMU
+
+**Status:** Accepted
+
+### Context
+
+Every container image in this project ships to an arm64 target. The Lambda
+function sets `architectures = ["arm64"]` and builds `FROM
+public.ecr.aws/lambda/python:3.12-arm64`; both Fargate task definitions set
+`cpu_architecture = "ARM64"`. Graviton was chosen for the usual reason — it is
+roughly 20% cheaper than x86 for the same work — and on a project whose whole
+cost story is "keep idle spend near zero", that matters.
+
+CI has to build those images to prove they still build. A GitHub-hosted
+`ubuntu-latest` runner is x86_64, so building an arm64 image there needs either
+cross-architecture emulation or a different runner.
+
+The images are not trivial to build. The Lambda image installs `xgboost`,
+`scikit-learn`, `feast[redis]`, `psycopg2-binary` and `s3fs`; the FastAPI image
+compiles wheels in a builder stage. Those are exactly the workloads emulation is
+worst at.
+
+### Decision
+
+Build all three images on GitHub's **native arm64 runner**, `ubuntu-24.04-arm`,
+in a matrix job. CI builds only — it never pushes, because pushing to ECR would
+require AWS credentials in the workflow and this workflow deliberately has none.
+
+The runner label is free for public repositories, which this one is. The build
+job also uses the GitHub Actions cache (`type=gha`) per image, so unchanged
+dependency layers are not rebuilt on every push.
+
+### Alternatives Considered
+
+1. **QEMU emulation via `docker/setup-qemu-action` on `ubuntu-latest`** —
+   Rejected. It works, and it is the right answer for a private repo with no
+   arm64 runner allowance, but emulated builds of native-extension wheels run
+   roughly 5–10x slower. A CI job that takes fifteen minutes instead of two is a
+   job people stop waiting for.
+2. **Build x86_64 images in CI and arm64 only when deploying** — Rejected. CI
+   would then be green on an image that is not the image production runs. The
+   failures this job exists to catch — a wheel with no arm64 build, a base image
+   that moved — are precisely the ones an x86 build would miss.
+3. **Self-hosted arm64 runner** — Rejected. An always-on runner costs more per
+   month than the entire idle AWS footprint, for a repository that gets a
+   handful of pushes a week.
+4. **Switch the whole stack to x86_64 so CI is simple** — Rejected. That is
+   letting the CI tail wag the architecture dog, and it gives up the Graviton
+   price difference permanently.
+
+### Consequences
+
+**Positive:**
+- CI builds bit-for-bit the same architecture production runs.
+- Build times stay in the low minutes, so the check is one people actually read.
+- No QEMU setup step, and no emulation-only flakiness to debug.
+
+**Negative:**
+- Depends on the repository staying public. If it ever goes private, this job
+  either needs a paid arm64 runner or has to fall back to QEMU — one line in
+  `.github/workflows/ci.yml` plus a `setup-qemu-action` step.
+- `ubuntu-24.04-arm` is a distinct runner image from `ubuntu-latest`; its
+  preinstalled tooling can differ. The job installs what it needs rather than
+  assuming.
+
+**What this signals to interviewers:** knowing that "it builds in CI" is only
+meaningful if CI builds the artifact you actually deploy, and that
+cross-architecture builds have a real cost that is worth choosing deliberately
+rather than copying from a template.

@@ -178,8 +178,12 @@ def test_predict_batch_returns_same_length() -> None:
 
 
 @pytest.mark.integration
-def test_load_production_detector_actually_works() -> None:
-    """Real MLflow test: load the production model and predict."""
+def test_load_production_detector_actually_works(require_mlflow: None) -> None:
+    """Real MLflow test: load the production model and predict.
+
+    Skipped (not failed) when no MLflow backend is reachable — see
+    `tests/conftest.py`.
+    """
     from fraud_mlops.inference import load_production_detector
 
     detector = load_production_detector()

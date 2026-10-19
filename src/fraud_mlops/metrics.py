@@ -135,8 +135,7 @@ def find_threshold_for_precision(
     chosen = float(valid_thresholds[best_idx])
 
     logger.info(
-        "Chose threshold=%.4f for min_precision=%.2f → "
-        "actual precision=%.4f, recall=%.4f",
+        "Chose threshold=%.4f for min_precision=%.2f → actual precision=%.4f, recall=%.4f",
         chosen,
         min_precision,
         precision[mask][best_idx],

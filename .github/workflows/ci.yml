@@ -1,0 +1,110 @@
+name: CI
+
+# Runs on every push to main and on every pull request. No AWS credentials are
+# configured anywhere in this workflow, and nothing here provisions, starts or
+# touches a billable resource — see ADR-019 for why that line is drawn hard.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch cancels the first; no point paying for a run
+# whose result nobody will look at.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # The Makefile targets call `uv run`, which would otherwise re-sync the
+  # environment and drop the dev extra we install explicitly below.
+  UV_NO_SYNC: "1"
+
+jobs:
+  quality:
+    name: Lint and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+
+      # The same two targets a developer runs locally. Calling make rather than
+      # ruff/mypy/pytest directly is the point: CI and local cannot drift into
+      # checking different things.
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test
+
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Format check
+        run: terraform fmt -check -recursive
+
+      # -backend=false: initialise providers for validation without touching
+      # the real S3 state backend. No credentials, no lock, no state read.
+      - name: Init (no backend)
+        run: terraform -chdir=infra init -backend=false
+
+      - name: Validate
+        run: terraform -chdir=infra validate
+
+  images:
+    name: Build images (arm64)
+    # Native arm64 runner rather than QEMU emulation — see ADR-020. All three
+    # images ship to arm64 targets: the Lambda function sets
+    # architectures = ["arm64"], and both Fargate task definitions set
+    # cpu_architecture = "ARM64".
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: fastapi
+            dockerfile: Dockerfile.fastapi
+          - name: mlflow
+            dockerfile: Dockerfile.mlflow
+          - name: lambda
+            dockerfile: lambda/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.name }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/arm64
+          # Build only. Pushing to ECR would need AWS credentials in CI, which
+          # this workflow deliberately does not have.
+          push: false
+          load: false
+          tags: fraud-mlops-${{ matrix.name }}:ci
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

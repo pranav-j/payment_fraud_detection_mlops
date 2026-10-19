@@ -22,8 +22,8 @@ resource "aws_ecs_task_definition" "mlflow" {
   }
 
   container_definitions = jsonencode([{
-    name  = "mlflow"
-    image = "${aws_ecr_repository.mlflow.repository_url}:v1"
+    name      = "mlflow"
+    image     = "${aws_ecr_repository.mlflow.repository_url}:v1"
     essential = true
 
     portMappings = [{
@@ -90,7 +90,7 @@ resource "aws_ecs_task_definition" "api" {
 
     environment = [
       { name = "MLFLOW_TRACKING_URI", value = "http://mlflow:5000" },
-      { name = "AWS_DEFAULT_REGION",  value = var.aws_region }
+      { name = "AWS_DEFAULT_REGION", value = var.aws_region }
     ]
 
     logConfiguration = {

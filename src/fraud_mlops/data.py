@@ -109,3 +109,92 @@ def split_features_label(
     X = df.drop(columns=[label_col])
     y = df[label_col]
     return X, y
+
+
+def _snap_boundary(step_counts: pd.Series, target_rows: int) -> int:
+    """Pick the time step whose cumulative row count is closest to `target_rows`.
+
+    Returns the last step that belongs to the earlier side of the split.
+    """
+    cumulative = step_counts.cumsum()
+    # Index of the step whose cumulative count is nearest the target.
+    position = int((cumulative - target_rows).abs().to_numpy().argmin())
+    return int(cumulative.index[position])
+
+
+def time_based_split_three_way(
+    df: pd.DataFrame,
+    val_fraction: float = 0.2,
+    test_fraction: float = 0.2,
+    time_col: str = TIME_COLUMN,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Split into train / validation / test by time, on whole time steps.
+
+    Two differences from `time_based_split`, both deliberate:
+
+    1. **Three ways, not two.** The threshold has to be tuned somewhere other
+       than the set it is reported on. Without a validation split, the only
+       options are "tune on train" (optimistic for the wrong reason) or "tune on
+       test" (optimistic for the obvious reason).
+    2. **Boundaries land between time steps.** `time_based_split` cuts at a row
+       index, so the simulated hour at the boundary ends up partly in train and
+       partly in test. Here a step belongs wholly to one split.
+
+    Note that PaySim's volume is heavily front-loaded: 80% of *rows* is only
+    about 48% of *hours*. These fractions are of rows, with the step boundary
+    snapped to whichever whole step comes closest, so the reported step ranges
+    will look lopsided against the row counts. That is the data, not a bug.
+
+    Args:
+        df: The full dataframe.
+        val_fraction: Target fraction of rows for validation (the middle slice).
+        test_fraction: Target fraction of rows for test (the latest slice).
+        time_col: Column to split on.
+
+    Returns:
+        (train_df, val_df, test_df), each sorted by `time_col`.
+    """
+    if time_col not in df.columns:
+        raise ValueError(f"Time column {time_col!r} not in dataframe")
+    if val_fraction + test_fraction >= 1.0:
+        raise ValueError(
+            f"val_fraction + test_fraction must leave room for training "
+            f"(got {val_fraction} + {test_fraction})"
+        )
+
+    df_sorted = df.sort_values(time_col).reset_index(drop=True)
+    step_counts = df_sorted.groupby(time_col).size().sort_index()
+    n = len(df_sorted)
+
+    train_end = _snap_boundary(step_counts, int(n * (1 - val_fraction - test_fraction)))
+    val_end = _snap_boundary(step_counts, int(n * (1 - test_fraction)))
+
+    # Guard against both boundaries snapping to the same step on tiny inputs.
+    if val_end <= train_end:
+        val_end = train_end + 1
+
+    train = df_sorted[df_sorted[time_col] <= train_end]
+    val = df_sorted[(df_sorted[time_col] > train_end) & (df_sorted[time_col] <= val_end)]
+    test = df_sorted[df_sorted[time_col] > val_end]
+
+    for name, part in (("train", train), ("validation", val), ("test", test)):
+        if part.empty:
+            raise ValueError(
+                f"The {name} split is empty — too few distinct values of {time_col!r} "
+                f"({df_sorted[time_col].nunique()}) for a three-way split"
+            )
+
+    logger.info(
+        "Three-way time split: train=%d (steps %d–%d), val=%d (steps %d–%d), test=%d (steps %d–%d)",
+        len(train),
+        train[time_col].min(),
+        train[time_col].max(),
+        len(val),
+        val[time_col].min(),
+        val[time_col].max(),
+        len(test),
+        test[time_col].min(),
+        test[time_col].max(),
+    )
+
+    return train, val, test
