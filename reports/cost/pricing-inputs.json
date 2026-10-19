@@ -1,0 +1,230 @@
+{
+  "fetched_at": "2026-10-19 14:55:06 UTC",
+  "region": "ap-south-1",
+  "currency": "USD",
+  "source": "AWS Price List API (pricing:GetProducts), on-demand terms",
+  "rates_missing": [],
+  "rates": {
+    "ec2_t4g_micro_hour": {
+      "label": "EC2 t4g.micro (Redis host), on-demand Linux",
+      "service": "AmazonEC2",
+      "filters": {
+        "instanceType": "t4g.micro",
+        "operatingSystem": "Linux",
+        "tenancy": "Shared",
+        "preInstalledSw": "NA",
+        "capacitystatus": "Used",
+        "licenseModel": "No License required"
+      },
+      "value": 0.0056,
+      "unit": "Hrs",
+      "aws_description": "$0.0056 per On Demand Linux t4g.micro Instance Hour",
+      "sku": "59S79M36KP4XSB6Y",
+      "price_list_published": "2026-10-15T19:13:16Z",
+      "note": null
+    },
+    "rds_db_t4g_micro_hour": {
+      "label": "RDS db.t4g.micro PostgreSQL, Single-AZ",
+      "service": "AmazonRDS",
+      "filters": {
+        "instanceType": "db.t4g.micro",
+        "databaseEngine": "PostgreSQL",
+        "deploymentOption": "Single-AZ"
+      },
+      "value": 0.021,
+      "unit": "Hrs",
+      "aws_description": "$ 0.021 per RDS db.t4g.micro Single-AZ instance hour (or partial hour) running PostgreSQL",
+      "sku": "GUT9JVEQBEMZ2FC7",
+      "price_list_published": "2026-10-06T22:40:50Z",
+      "note": null
+    },
+    "rds_gp2_gb_month": {
+      "label": "RDS gp2 storage",
+      "service": "AmazonRDS",
+      "filters": {
+        "productFamily": "Database Storage",
+        "volumeType": "General Purpose",
+        "deploymentOption": "Single-AZ",
+        "databaseEngine": "PostgreSQL"
+      },
+      "value": 0.131,
+      "unit": "GB-Mo",
+      "aws_description": "$0.131 per GB-month of provisioned gp2 storage running PostgreSQL",
+      "sku": "FW8R33J4SMXQCXF5",
+      "price_list_published": "2026-10-06T22:40:50Z",
+      "note": null
+    },
+    "alb_hour": {
+      "label": "Application Load Balancer, per hour",
+      "service": "AWSELB",
+      "filters": {
+        "productFamily": "Load Balancer-Application",
+        "usagetype": "APS3-LoadBalancerUsage"
+      },
+      "value": 0.0239,
+      "unit": "Hrs",
+      "aws_description": "$0.0239 per Application LoadBalancer-hour (or partial hour)",
+      "sku": "WJ2MHASNP2ZNKFXX",
+      "price_list_published": "2026-09-11T12:45:44Z",
+      "note": null
+    },
+    "alb_lcu_hour": {
+      "label": "ALB Load Balancer Capacity Unit, per hour",
+      "service": "AWSELB",
+      "filters": {
+        "productFamily": "Load Balancer-Application",
+        "usagetype": "APS3-LCUUsage"
+      },
+      "value": 0.008,
+      "unit": "LCU-Hrs",
+      "aws_description": "$0.008 per used Application load balancer capacity unit-hour (or partial hour)",
+      "sku": "HFFD75W4GFXQPHZR",
+      "price_list_published": "2026-09-11T12:45:44Z",
+      "note": null
+    },
+    "kinesis_shard_hour": {
+      "label": "Kinesis Data Streams provisioned shard, per hour",
+      "service": "AmazonKinesis",
+      "filters": {
+        "usagetype": "APS3-Storage-ShardHour"
+      },
+      "value": 0.0175,
+      "unit": "ShardHour",
+      "aws_description": "$0.0175 per provisioned shard-hour",
+      "sku": "4ZRP6XAJW75KY8RX",
+      "price_list_published": "2026-09-11T12:44:43Z",
+      "note": null
+    },
+    "kinesis_put_payload_unit": {
+      "label": "Kinesis PUT payload unit (25 KB), each",
+      "service": "AmazonKinesis",
+      "filters": {
+        "usagetype": "APS3-PutRequestPayloadUnits"
+      },
+      "value": 1.85e-08,
+      "unit": "PutRequest",
+      "aws_description": "$0.0185 per 1 million payload units",
+      "sku": "HUMJNN6E9PT6BGMH",
+      "price_list_published": "2026-09-11T12:44:43Z",
+      "note": null
+    },
+    "lambda_arm_gb_second": {
+      "label": "Lambda arm64 duration, per GB-second",
+      "service": "AWSLambda",
+      "filters": {
+        "usagetype": "APS3-Lambda-GB-Second-ARM"
+      },
+      "value": 1.20001e-05,
+      "unit": "Lambda-GB-Second",
+      "aws_description": "AWS Lambda - Total Compute for ARM - Asia Pacific (Mumbai)-Tier-2",
+      "sku": "69Y7TUFYEF9HAV59",
+      "price_list_published": "2026-10-16T18:23:59Z",
+      "note": null
+    },
+    "lambda_arm_request": {
+      "label": "Lambda arm64 request, each",
+      "service": "AWSLambda",
+      "filters": {
+        "usagetype": "APS3-Request-ARM"
+      },
+      "value": 2e-07,
+      "unit": "Requests",
+      "aws_description": "AWS Lambda - Total Requests for ARM - Asia Pacific (Mumbai)",
+      "sku": "RYFSQRRXQ4R9CK7A",
+      "price_list_published": "2026-10-16T18:23:59Z",
+      "note": null
+    },
+    "fargate_arm_vcpu_hour": {
+      "label": "Fargate ARM vCPU, per hour",
+      "service": "AmazonECS",
+      "filters": {
+        "usagetype": "APS3-Fargate-ARM-vCPU-Hours:perCPU"
+      },
+      "value": 0.02383,
+      "unit": "hours",
+      "aws_description": "AWS Fargate - ARM - vCPU - Asia Pacific (Mumbai)",
+      "sku": "D8HH737U8NPWA5K7",
+      "price_list_published": "2026-09-11T12:44:25Z",
+      "note": null
+    },
+    "fargate_arm_gb_hour": {
+      "label": "Fargate ARM memory, per GB-hour",
+      "service": "AmazonECS",
+      "filters": {
+        "usagetype": "APS3-Fargate-ARM-GB-Hours"
+      },
+      "value": 0.00261,
+      "unit": "hours",
+      "aws_description": "AWS Fargate - ARM - Memory - Asia Pacific (Mumbai)",
+      "sku": "2FMN22NTTSFVP7KR",
+      "price_list_published": "2026-09-11T12:44:25Z",
+      "note": null
+    },
+    "s3_standard_gb_month": {
+      "label": "S3 Standard storage, per GB-month (first 50 TB)",
+      "service": "AmazonS3",
+      "filters": {
+        "productFamily": "Storage",
+        "storageClass": "General Purpose"
+      },
+      "value": 0.025,
+      "unit": "GB-Mo",
+      "aws_description": "$0.025 per GB-Mo of Storage in Annotations ",
+      "sku": "BWGYM58849ERMUYT",
+      "price_list_published": "2026-10-15T17:35:40Z",
+      "note": "2 products matched; took the first with a non-zero on-demand rate. Check `aws_description` reads as expected."
+    },
+    "ecr_storage_gb_month": {
+      "label": "ECR image storage, per GB-month",
+      "service": "AmazonECR",
+      "filters": {
+        "usagetype": "APS3-TimedStorage-ByteHrs"
+      },
+      "value": 0.1,
+      "unit": "GB-Mo",
+      "aws_description": "$0.10 per GB-month of data storage",
+      "sku": "WRGBK4S2T45GRPMB",
+      "price_list_published": "2026-09-11T12:44:25Z",
+      "note": null
+    },
+    "secretsmanager_secret_month": {
+      "label": "Secrets Manager, per secret per month",
+      "service": "AWSSecretsManager",
+      "filters": {
+        "usagetype": "APS3-AWSSecretsManager-Secrets"
+      },
+      "value": 0.4,
+      "unit": "Secrets",
+      "aws_description": "$0.40 per Secret",
+      "sku": "AET58EC77HZBS8AB",
+      "price_list_published": "2026-09-11T12:46:10Z",
+      "note": null
+    },
+    "cloudwatch_logs_ingest_gb": {
+      "label": "CloudWatch Logs ingestion, per GB",
+      "service": "AmazonCloudWatch",
+      "filters": {
+        "usagetype": "APS3-DataProcessing-Bytes"
+      },
+      "value": 0.67,
+      "unit": "GB",
+      "aws_description": "$0.67 per GB custom log data ingested in Standard log class - Asia Pacific (Mumbai)",
+      "sku": "JBQP6QEETS2BK5DQ",
+      "price_list_published": "2026-10-07T11:55:40Z",
+      "note": null
+    },
+    "public_ipv4_hour": {
+      "label": "Public IPv4 address, per hour",
+      "service": "AmazonVPC",
+      "filters": {
+        "usagetype": "APS3-PublicIPv4:InUseAddress"
+      },
+      "value": 0.005,
+      "unit": "Hrs",
+      "aws_description": "$0.005 per In-use public IPv4 address per hour",
+      "sku": "H6SHSM3KDNNZRM9E",
+      "price_list_published": "2026-10-16T22:43:21Z",
+      "note": null
+    }
+  }
+}
