@@ -288,6 +288,108 @@ know about results on PaySim.
 
 ---
 
+## Labels and performance monitoring
+
+Drift detection answers *"has the input data changed?"*. It cannot answer *"is
+the model still right?"* — and those come apart in exactly the case that
+matters. A fraud pattern that shifts *within* the existing input distribution
+looks ordinary by construction: that is what adapting to a deployed model means.
+Drift stays flat and recall collapses.
+
+Measuring recall needs outcomes, and outcomes are late. A fraud label is a
+chargeback or a dispute: it arrives days to weeks after the transaction. So the
+label delay is modelled explicitly rather than wished away.
+
+### Two tables, because "true" and "known" are different things
+
+| Table | What it holds |
+|---|---|
+| `ground_truth` | What the simulator knows, written by the producer at send time. Never reaches the scorer. |
+| `labels` | What the business has been *told*, with an explicit `label_available_at`. |
+
+`scripts/replay_labels.py` moves rows from the first to the second once
+`LABEL_DELAY_HOURS` have elapsed since the decision, stamping maturity as
+`scored_at + delay` so the result is the same whether it runs every minute or
+once a day.
+
+The split is the design: the performance flow can only read `labels`, and only
+rows whose `label_available_at` has passed. It is structurally unable to see an
+outcome earlier than the business would have.
+
+**Two clocks.** PaySim's `step` is a *simulated* hour — a column in a static
+file that never advances in real time. The replay runs on wall-clock time, so
+`LABEL_DELAY_HOURS` is real hours since the decision: `0.05` (three minutes) for
+a demo, `720` (thirty days) for a realistic chargeback window.
+
+### The daily flow
+
+`flows/monitor_performance.py` joins matured labels to decisions, computes
+realized precision and recall per 24-hour window, pushes to Prometheus and
+alerts via SNS. Daily rather than hourly, because labels arrive on the order of
+days.
+
+Two things it deliberately refuses to do:
+
+- **A window with no matured labels reports `None`, not `0.0`.** Zero recall and
+  "nothing to measure yet" are different states, and the newest window is always
+  the second one.
+- **An alert needs evidence.** At least 50 matured labels and 10 matured fraud
+  cases before realized recall can fire an alert. Recall over three positives
+  moves 33 points per case; alerting on that trains people to mute the alert.
+
+The Grafana dashboard leads with realized precision and recall, with a
+"labels not yet matured" panel beside it, so the blind spot is visible rather
+than implied by a flat line.
+
+### The demo: a shift that drift cannot see
+
+```bash
+python -m fraud_mlops.db migrate                   # create the tables
+python scripts/demo_performance_drop.py --plan     # print the steps, send nothing
+python scripts/demo_performance_drop.py            # run it
+```
+
+Three phases: normal traffic with PaySim-style fraud (the origin account is
+emptied, which is the pattern the model learned); then fraud that takes small
+amounts and leaves a balance behind; then the wait for labels to mature. Drift
+stays flat throughout — the amounts involved look like ordinary traffic —
+while realized recall collapses, but only *after* the delay has elapsed.
+
+That lag is not a flaw in the implementation. It is the honest cost of
+outcome-based monitoring, and it is the argument for keeping drift detection
+rather than replacing it.
+
+### How a promoted model actually reaches the serving paths
+
+Worth being precise about, because "the registry has an alias" says nothing
+about when traffic moves.
+
+| Path | How it resolves `@production` | When a promotion takes effect |
+|---|---|---|
+| **Lambda** (streaming) | `load_production_detector()` at module import — once per container, during init | Within `MODEL_TTL_SECONDS` (default 900s). The handler re-resolves the alias when its cached model is older than the TTL. |
+| **Fargate** (synchronous) | FastAPI lifespan hook — once per task start | Not until the service is redeployed: `aws ecs update-service --force-new-deployment`. Nothing triggers this automatically. |
+
+Before the TTL existed, a warm Lambda container served whatever version it
+resolved at cold start, indefinitely — AWS recycles containers on its own
+schedule, so there was no bound at all, and the `decisions` audit log recorded
+two model versions deciding concurrently with nothing to explain it. ADR-022
+covers the options and why the retrain flow does not yet force a Lambda
+configuration update, which would be the better production answer.
+
+### What the retrain flow trains on
+
+`flows/retrain_model.py` reads `data/interim/paysim_with_features.parquet` — a
+static local file. It does not read the `decisions` table or any newer data, and
+it splits randomly rather than by time. With a fixed seed on unchanging data,
+each weekly run produces essentially the same model, so the 2-percentage-point
+promotion gate refuses every time. The gate has never been exercised against a
+genuinely better candidate.
+
+This is documented rather than fixed: changing what the model trains on is a
+modelling decision, and this round of work was about measurement.
+
+---
+
 ## Tech stack
 
 | Concern | Tooling |

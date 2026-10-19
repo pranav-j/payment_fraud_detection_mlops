@@ -32,3 +32,9 @@ variable "developer_ip" {
   description = "Developer Mac IP for RDS direct access"
   type        = string
 }
+
+variable "model_ttl_seconds" {
+  description = "How long a warm Lambda container may serve a cached @production model before re-resolving the alias. 0 disables re-checking."
+  type        = number
+  default     = 900
+}
