@@ -1,0 +1,59 @@
+# Prometheus, Pushgateway and Grafana, for drift and performance dashboards.
+#
+# These ran on a developer machine with no committed configuration, which meant
+# the dashboards could not be reproduced by anyone else — including by this
+# project later. `make monitoring-up` now brings the whole thing up with the
+# datasource and dashboard already provisioned.
+#
+# The flows push to the Pushgateway rather than being scraped, because they are
+# short-lived: a Prefect flow that runs for ninety seconds is not around long
+# enough for Prometheus to scrape it.
+#
+# No container_name here on purpose: fixed names collide with any containers
+# already on the machine, and this repo had earlier hand-started prometheus and
+# grafana containers holding dashboard work worth not clobbering.
+
+services:
+  pushgateway:
+    image: prom/pushgateway:v1.10.0
+    ports:
+      - "9091:9091"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    depends_on:
+      - pushgateway
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    ports:
+      - "3000:3000"
+    environment:
+      # Local-only stack with no data worth protecting; anonymous admin keeps
+      # the screenshot workflow to a single command.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_USERS_DEFAULT_THEME: light
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:

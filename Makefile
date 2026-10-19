@@ -2,7 +2,7 @@
 # Run `make help` to see available commands.
 # Tabs (not spaces!) are required for indentation in Makefiles.
 
-.PHONY: help install install-dev data clean lint format test notebook check evaluate evaluate-quick features cost pricing
+.PHONY: help install install-dev data clean lint format test notebook check evaluate evaluate-quick features cost pricing monitoring-up monitoring-down
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -41,6 +41,15 @@ cost:  ## Regenerate the cost estimate from reports/cost/pricing-inputs.json
 
 pricing:  ## Re-fetch ap-south-1 rates from the AWS Price List API (free, read-only)
 	uv run python scripts/fetch_pricing.py
+
+monitoring-up:  ## Start Prometheus + Pushgateway + Grafana (dashboard provisioned)
+	docker compose -f docker-compose.monitoring.yml up -d
+	@echo "Grafana:    http://localhost:3000  (anonymous admin, dashboard 'fraud-mlops')"
+	@echo "Prometheus: http://localhost:9090"
+	@echo "Pushgateway: http://localhost:9091"
+
+monitoring-down:  ## Stop the local monitoring stack
+	docker compose -f docker-compose.monitoring.yml down
 
 lint:  ## Run linter without fixing
 	uv run ruff check .

@@ -1,0 +1,479 @@
+{
+  "uid": "fraud-mlops",
+  "title": "Fraud detector \u2014 drift and realized performance",
+  "description": "Top: did the model get it right, against labels that have matured. Bottom: has the input data moved. The two answer different questions, and a shift can show in one without the other.",
+  "tags": [
+    "fraud-mlops"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Realized performance (matured labels only)",
+      "description": "Precision and recall against outcome labels that have actually arrived. A flat or missing right-hand edge is expected \u2014 those decisions have no labels yet. See the maturity panel beside this one.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fraud-mlops-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 16,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fraud_detector_realized_recall",
+          "legendFormat": "realized recall",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fraud-mlops-prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "fraud_detector_realized_precision",
+          "legendFormat": "realized precision",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fraud-mlops-prometheus"
+          }
+        },
+        {
+          "refId": "C",
+          "expr": "0.70",
+          "legendFormat": "recall floor (alert)",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fraud-mlops-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto",
+            "gradientMode": "none"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Label maturity \u2014 what we cannot judge yet",
+      "description": "Share of the newest window's decisions whose labels have arrived. The gap below 100% is the blind spot: scored, outcome unknown. Realized recall cannot cover those transactions.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fraud-mlops-prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 8,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fraud_detector_label_maturity_share",
+          "legendFormat": "labels matured",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fraud-mlops-prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "1 - fraud_detector_label_maturity_share",
+          "legendFormat": "not yet matured",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fraud-mlops-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 35,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto",
+            "gradientMode": "none"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Evidence behind the recall number",
+      "description": "Matured labels and matured fraud cases in the window the realized metrics describe. The alert rule needs 50 labels and 10 fraud cases before it fires, so recall computed over less is shown but never alerted on.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fraud-mlops-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 24,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fraud_detector_matured_labels",
+          "legendFormat": "matured labels",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fraud-mlops-prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "fraud_detector_matured_positives",
+          "legendFormat": "matured fraud cases",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fraud-mlops-prometheus"
+          }
+        },
+        {
+          "refId": "C",
+          "expr": "fraud_detector_pending_labels",
+          "legendFormat": "still pending",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fraud-mlops-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto",
+            "gradientMode": "none"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Drift share",
+      "description": "Share of monitored columns whose distribution has drifted from the training baseline. Answers a different question from the panels above: this is about the inputs, not about whether the model was right.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fraud-mlops-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fraud_detector_drift_share",
+          "legendFormat": "drift share",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fraud-mlops-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto",
+            "gradientMode": "none"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Drift detected",
+      "description": "1 when drift share crosses the configured threshold.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fraud-mlops-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fraud_detector_drift_detected",
+          "legendFormat": "drift detected",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fraud-mlops-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto",
+            "gradientMode": "none"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Drifted columns",
+      "description": "How many monitored columns are drifting.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fraud-mlops-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fraud_detector_drifted_columns_count",
+          "legendFormat": "drifted columns",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fraud-mlops-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto",
+            "gradientMode": "none"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    }
+  ]
+}
