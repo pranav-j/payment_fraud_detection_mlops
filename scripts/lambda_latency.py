@@ -14,6 +14,17 @@ cold ones are tens of seconds, and the mix depends entirely on traffic shape.
 CloudWatch's own metrics can't do this — the `Duration` metric has no cold/warm
 dimension — so this reads the log lines.
 
+**The 10-second init timeout.** If a function's initialisation runs longer than
+Lambda's init phase allows (10s), Lambda abandons that phase, emits a separate
+
+    INIT_REPORT Init Duration: 9999.64 ms  Phase: init  Status: timeout
+
+and re-runs the initialisation *inside the first invocation*. That invocation's
+REPORT line then has no `Init Duration` at all — the init cost is folded into
+`Duration`. A parser that only looks for `Init Duration` therefore reports zero
+cold starts for precisely the functions with the worst ones. This one reads
+INIT_REPORT lines too, and says so in the output.
+
 Usage:
     python scripts/lambda_latency.py --hours 2
     python scripts/lambda_latency.py --hours 24 --out reports/perf/2026-10-19
@@ -40,6 +51,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 logger = logging.getLogger("lambda_latency")
 
 DEFAULT_LOG_GROUP = "/aws/lambda/fraud-mlops-scorer"
+
+INIT_REPORT_PATTERN = re.compile(
+    r"INIT_REPORT\s+Init Duration:\s*(?P<init>[\d.]+)\s*ms"
+    r"(?:.*?Phase:\s*(?P<phase>\w+))?"
+    r"(?:.*?Status:\s*(?P<status>\w+))?",
+    re.DOTALL,
+)
 
 REPORT_PATTERN = re.compile(
     r"Duration:\s*(?P<duration>[\d.]+)\s*ms.*?"
@@ -92,12 +110,15 @@ def summarize(population: str, values: list[float]) -> DurationSummary:
     )
 
 
-def fetch_reports(log_group: str, start: datetime, end: datetime, region: str) -> list[dict]:
-    """Every REPORT line in the window, parsed."""
+def fetch_reports(
+    log_group: str, start: datetime, end: datetime, region: str
+) -> tuple[list[dict], list[dict]]:
+    """Every REPORT and INIT_REPORT line in the window, parsed."""
     client = boto3.client("logs", region_name=region)
     paginator = client.get_paginator("filter_log_events")
 
     rows: list[dict] = []
+    inits: list[dict] = []
     pages = paginator.paginate(
         logGroupName=log_group,
         startTime=int(start.timestamp() * 1000),
@@ -107,7 +128,21 @@ def fetch_reports(log_group: str, start: datetime, end: datetime, region: str) -
 
     for page in pages:
         for event in page.get("events", []):
-            match = REPORT_PATTERN.search(event["message"])
+            message = event["message"]
+
+            if message.lstrip().startswith("INIT_REPORT"):
+                init_match = INIT_REPORT_PATTERN.search(message)
+                if init_match:
+                    inits.append(
+                        {
+                            "timestamp": datetime.fromtimestamp(event["timestamp"] / 1000, tz=UTC),
+                            "init_ms": float(init_match.group("init")),
+                            "status": (init_match.group("status") or "ok").lower(),
+                        }
+                    )
+                continue
+
+            match = REPORT_PATTERN.search(message)
             if not match:
                 continue
             rows.append(
@@ -121,13 +156,41 @@ def fetch_reports(log_group: str, start: datetime, end: datetime, region: str) -
                 }
             )
 
-    logger.info("Parsed %d REPORT lines from %s", len(rows), log_group)
-    return rows
+    logger.info(
+        "Parsed %d REPORT and %d INIT_REPORT lines from %s", len(rows), len(inits), log_group
+    )
+    return rows, inits
 
 
-def build_report(rows: list[dict], start: datetime, end: datetime, log_group: str) -> dict:
+def build_report(
+    rows: list[dict],
+    inits: list[dict],
+    start: datetime,
+    end: datetime,
+    log_group: str,
+) -> dict:
     cold = [r for r in rows if r["init_ms"] is not None]
-    warm = [r for r in rows if r["init_ms"] is None]
+    timed_out_inits = [i for i in inits if i["status"] == "timeout"]
+
+    # When init times out, Lambda re-runs it inside the first invocation and
+    # that REPORT line carries no Init Duration. Those invocations look warm and
+    # are anything but, so match each timed-out init to the next invocation
+    # after it.
+    folded: set[int] = set()
+    for init in timed_out_inits:
+        later = [
+            (idx, r)
+            for idx, r in enumerate(rows)
+            if r["timestamp"] >= init["timestamp"] and idx not in folded
+        ]
+        if later:
+            folded.add(min(later, key=lambda pair: pair[1]["timestamp"])[0])
+
+    for idx in folded:
+        rows[idx]["init_folded_in"] = True
+
+    warm = [r for r in rows if r["init_ms"] is None and not r.get("init_folded_in")]
+    folded_rows = [r for r in rows if r.get("init_folded_in")]
 
     summaries = [
         summarize("all", [r["duration_ms"] for r in rows]),
@@ -138,6 +201,11 @@ def build_report(rows: list[dict], start: datetime, end: datetime, log_group: st
         summarize("cold (init only)", [r["init_ms"] for r in cold if r["init_ms"]]),
         # What the caller actually waits for on a cold start.
         summarize("cold (init + handler)", [r["duration_ms"] + r["init_ms"] for r in cold]),
+        # Invocations that absorbed a timed-out init. The whole init cost is
+        # inside Duration here, so this IS the cold-start latency.
+        summarize(
+            "cold (init timed out, folded into invoke)", [r["duration_ms"] for r in folded_rows]
+        ),
     ]
 
     memory_used = [r["max_memory_used_mb"] for r in rows]
@@ -148,9 +216,14 @@ def build_report(rows: list[dict], start: datetime, end: datetime, log_group: st
         "window_start": start.isoformat(),
         "window_end": end.isoformat(),
         "invocations": len(rows),
-        "cold_starts": len(cold),
+        "cold_starts": len(cold) + len(folded_rows),
+        "cold_starts_with_init_duration": len(cold),
+        "cold_starts_with_init_timeout": len(folded_rows),
+        "init_reports": len(inits),
+        "init_timeouts": len(timed_out_inits),
+        "init_timeout_ms": timed_out_inits[0]["init_ms"] if timed_out_inits else None,
         "warm_invocations": len(warm),
-        "cold_start_share": (len(cold) / len(rows)) if rows else 0.0,
+        "cold_start_share": ((len(cold) + len(folded_rows)) / len(rows)) if rows else 0.0,
         "memory_size_mb": rows[0]["memory_mb"] if rows else None,
         "max_memory_used_mb": max(memory_used) if memory_used else None,
         "durations": [s.to_dict() for s in summaries],
@@ -180,6 +253,19 @@ def render(report: dict) -> str:
             f"{row['p95_ms']:.1f} ms | {row['p99_ms']:.1f} ms | "
             f"{row['min_ms']:.1f} ms | {row['max_ms']:.1f} ms |"
         )
+    if report.get("init_timeouts"):
+        lines += [
+            "",
+            f"> **This function's initialisation times out.** {report['init_timeouts']} "
+            f"INIT_REPORT line(s) show `Status: timeout` at "
+            f"{report['init_timeout_ms']:.0f} ms — Lambda's init phase gives a function "
+            f"10 seconds, and loading MLflow, the model artifact and the Feast registry "
+            f"takes longer. Lambda then re-runs initialisation inside the first "
+            f"invocation, so that invocation's REPORT line carries no `Init Duration` "
+            f"and the whole init cost lands in `Duration`. The last row above is the "
+            f"real cold-start latency.",
+        ]
+
     lines += [
         "",
         "Cold and warm are reported separately because they are different "
@@ -212,7 +298,7 @@ def main() -> None:
     end = datetime.now(UTC)
     start = end - timedelta(hours=args.hours)
 
-    rows = fetch_reports(args.log_group, start, end, region)
+    rows, inits = fetch_reports(args.log_group, start, end, region)
     if not rows:
         print(
             f"No REPORT lines found in {args.log_group} for the last {args.hours}h. "
@@ -220,7 +306,7 @@ def main() -> None:
         )
         return
 
-    report = build_report(rows, start, end, args.log_group)
+    report = build_report(rows, inits, start, end, args.log_group)
     text = render(report)
     print(text)
 
