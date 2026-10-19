@@ -179,12 +179,21 @@ def push_metrics_to_prometheus(windows: list[WindowMetrics]) -> None:
 
 
 @task
-def send_alert_if_degraded(decision: AlertDecision) -> bool:
-    """Publish an SNS alert when realized recall has genuinely dropped."""
+def send_alert_if_degraded(decision: AlertDecision, alerts_enabled: bool = True) -> bool:
+    """Publish an SNS alert when realized recall has genuinely dropped.
+
+    `alerts_enabled=False` computes and logs the alert without sending it, which
+    is how the flow is exercised against a local Postgres without needing an SNS
+    topic or emailing anyone.
+    """
     logger = get_run_logger()
 
     if not decision.should_alert:
         logger.info("No performance alert: %s", decision.reason)
+        return False
+
+    if not alerts_enabled:
+        logger.warning("ALERT (not sent, alerts_enabled=False): %s", decision.reason)
         return False
 
     window = decision.window
@@ -229,6 +238,7 @@ def monitor_performance_flow(
     recall_floor: float = DEFAULT_RECALL_FLOOR,
     min_matured_labels: int = DEFAULT_MIN_MATURED_LABELS,
     min_matured_positives: int = DEFAULT_MIN_MATURED_POSITIVES,
+    alerts_enabled: bool = True,
 ) -> None:
     """Daily: measure realized precision and recall, publish, alert if degraded."""
     logger = get_run_logger()
@@ -256,10 +266,32 @@ def monitor_performance_flow(
     logger.info("Alert evaluation: %s", json.dumps(decision.to_dict(), indent=2, default=str))
 
     push_metrics_to_prometheus(windows=windows)
-    send_alert_if_degraded(decision=decision)
+    send_alert_if_degraded(decision=decision, alerts_enabled=alerts_enabled)
 
     logger.info("Performance monitoring complete.")
 
 
 if __name__ == "__main__":
-    monitor_performance_flow()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run the performance monitoring flow")
+    parser.add_argument("--lookback-days", type=int, default=14)
+    parser.add_argument("--window-hours", type=int, default=24)
+    parser.add_argument(
+        "--recall-floor",
+        type=float,
+        default=float(os.environ.get("PERFORMANCE_RECALL_FLOOR", DEFAULT_RECALL_FLOOR)),
+    )
+    parser.add_argument(
+        "--no-alerts",
+        action="store_true",
+        help="Compute and log the alert without publishing to SNS",
+    )
+    cli_args = parser.parse_args()
+
+    monitor_performance_flow(
+        lookback_days=cli_args.lookback_days,
+        window_hours=cli_args.window_hours,
+        recall_floor=cli_args.recall_floor,
+        alerts_enabled=not cli_args.no_alerts,
+    )
