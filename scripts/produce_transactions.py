@@ -71,9 +71,7 @@ def produce(rate: float, fraud_rate: float, count: int | None) -> None:
     step = 1
     sent = 0
 
-    print(
-        f"Producing to stream '{STREAM_NAME}' at {rate} txn/sec " f"(fraud rate: {fraud_rate:.0%})"
-    )
+    print(f"Producing to stream '{STREAM_NAME}' at {rate} txn/sec (fraud rate: {fraud_rate:.0%})")
     print("Ctrl-C to stop\n")
 
     try:

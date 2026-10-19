@@ -131,10 +131,10 @@ def send_alert_if_drift(metrics: dict) -> bool:
 Drift detected in production predictions.
 
 Metrics:
-- Drifted columns: {metrics.get('n_drifted_columns', 0)}
-- Drift share: {metrics.get('drift_share', 0):.1%}
+- Drifted columns: {metrics.get("n_drifted_columns", 0)}
+- Drift share: {metrics.get("drift_share", 0):.1%}
 
-Full report: {metrics.get('report_url', 'N/A')}
+Full report: {metrics.get("report_url", "N/A")}
 Time: {datetime.utcnow().isoformat()}
     """.strip()
 

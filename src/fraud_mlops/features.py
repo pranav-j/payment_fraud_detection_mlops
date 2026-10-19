@@ -29,6 +29,7 @@ include "now" in "the last 24h".
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -235,3 +236,56 @@ def engineer_features(
     _assert_no_lookahead(df, sender_col)
 
     return df
+
+
+def build_features_parquet(
+    csv_path: Path | None = None,
+    out_path: Path | None = None,
+) -> Path:
+    """Engineer features from the raw PaySim CSV and write the cached parquet.
+
+    This is the artifact `flows/retrain_model.py` trains on and that Feast's
+    offline store is built from, so its schema is a contract:
+
+    - the sender column is named ``sender`` (not ``nameOrig``), which is the
+      Feast entity key;
+    - ``event_timestamp`` is present, which is Feast's timestamp field.
+
+    The notebook that originally produced this file did neither rename, so the
+    committed parquet could not be reproduced from the committed code. Writing
+    it from here closes that gap.
+
+    Returns:
+        The path written.
+    """
+    from fraud_mlops.config import DATA_INTERIM_DIR, PAYSIM_PATH
+    from fraud_mlops.data import load_paysim
+
+    csv_path = csv_path or PAYSIM_PATH
+    out_path = out_path or DATA_INTERIM_DIR / "paysim_with_features.parquet"
+
+    # drop_leaky=False keeps nameOrig, which the grouping needs. isFlaggedFraud
+    # is dropped explicitly — it is PaySim's own rule, not a learned signal.
+    df = load_paysim(csv_path, drop_leaky=False).drop(columns=["isFlaggedFraud"])
+    logger.info("Engineering features for %d rows", len(df))
+
+    out = engineer_features(df, sender_col="nameOrig")
+    out = out.rename(columns={"nameOrig": "sender"})
+    out["event_timestamp"] = pd.to_datetime(out[TIME_COLUMN], unit="h", origin=TIMESTAMP_ORIGIN)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out.to_parquet(out_path, index=False)
+    logger.info("Wrote %d rows x %d cols to %s", len(out), out.shape[1], out_path)
+    return out_path
+
+
+if __name__ == "__main__":  # pragma: no cover - thin CLI wrapper
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Rebuild the engineered-feature parquet")
+    parser.add_argument("--csv", type=Path, default=None, help="Raw PaySim CSV")
+    parser.add_argument("--out", type=Path, default=None, help="Output parquet path")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    build_features_parquet(csv_path=args.csv, out_path=args.out)

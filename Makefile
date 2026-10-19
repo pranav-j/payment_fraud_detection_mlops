@@ -2,7 +2,7 @@
 # Run `make help` to see available commands.
 # Tabs (not spaces!) are required for indentation in Makefiles.
 
-.PHONY: help install install-dev data clean lint format test notebook check
+.PHONY: help install install-dev data clean lint format test notebook check evaluate evaluate-quick features
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -26,6 +26,15 @@ mlflow-ui:  ## Launch the MLflow UI at http://localhost:5000
 mlflow-clean:  ## DANGER: delete all MLflow runs and the SQLite DB
 	rm -rf mlruns mlflow.db
 	@echo "✓ Cleared MLflow state. Next training run starts fresh."
+
+evaluate:  ## Run the full evaluation protocol -> reports/metrics/
+	uv run python -m fraud_mlops.evaluate
+
+evaluate-quick:  ## Fast evaluation on a 10% sample (sanity check, not for reporting)
+	uv run python -m fraud_mlops.evaluate --sample-frac 0.1 --bootstrap 200
+
+features:  ## Rebuild data/interim/paysim_with_features.parquet from the raw CSV
+	uv run python -m fraud_mlops.features
 
 lint:  ## Run linter without fixing
 	uv run ruff check .

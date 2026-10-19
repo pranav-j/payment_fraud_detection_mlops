@@ -44,7 +44,7 @@ dev = [
     "ipykernel>=6.29.0",
     "nbstripout>=0.7.0",
     # Code quality
-    "ruff>=0.6.0",
+    "ruff>=0.15.0,<0.16",  # keep in step with .pre-commit-config.yaml
     "mypy>=1.10.0",
     "pre-commit>=3.7.0",
     # Testing

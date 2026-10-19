@@ -941,3 +941,115 @@ dependency layers are not rebuilt on every push.
 meaningful if CI builds the artifact you actually deploy, and that
 cross-architecture builds have a real cost that is worth choosing deliberately
 rather than copying from a template.
+
+---
+
+## ADR-021: Evaluation protocol — time split, validation-tuned threshold, bootstrap intervals
+
+**Status:** Accepted
+
+### Context
+
+The numbers this project reported for most of its life came from the modelling
+notebooks, and the notebooks had four problems that all pushed in the same
+direction — making the model look better than it was.
+
+1. **The split was by row index, not by time.** `time_based_split` sorted by
+   `step` and cut at 80% of *rows*. Because PaySim's volume is heavily
+   front-loaded, 80% of rows is only about 48% of hours, and the simulated hour
+   at the boundary landed partly in train and partly in test.
+2. **There was no validation set.** Notebook 02 says so in as many words: "For
+   this notebook we'll use the test set for simplicity." The decision threshold
+   was therefore chosen on the same rows it was then reported from, which makes
+   the reported recall an optimistic estimate of a threshold nobody could have
+   picked in advance.
+3. **A single point estimate, no interval.** v1's 80.4% and v2's 84.5% were
+   quoted as though the 4-point gap were a result.
+4. **No PR-AUC.** Recall and precision at one threshold describe one point on a
+   curve. Without the area, there was no way to tell whether a model was better
+   or merely cut at a different place.
+
+Separately, PaySim's balance columns were never examined, despite the EDA
+notebook noticing the "balance signature of fraud" and then moving on.
+
+### Decision
+
+One protocol, in `src/fraud_mlops/evaluate.py`, run by `make evaluate`, applied
+identically to every model and written to `reports/metrics/evaluation.json`.
+Every number in the README traces to that file.
+
+- **Three-way split by time, on whole steps.** Train on the earliest hours,
+  validate on the next block, test on the latest. `time_based_split_three_way`
+  snaps each boundary to a step boundary, so no simulated hour is divided.
+- **Tune on validation, report on test.** The threshold maximises recall subject
+  to precision >= 95% on the validation split only.
+- **Report both numbers that "recall at 95% precision" could mean.** The
+  threshold-free value from the test curve (an upper bound, found with
+  hindsight) *and* the recall actually delivered at the validation-chosen
+  threshold. The gap between them is the cost of not being able to tune on the
+  future, and it is large.
+- **Percentile bootstrap intervals**, 1,000 resamples, for PR-AUC and for recall
+  at 95% precision.
+- **A ladder of baselines on the same splits:** a hand-written amount rule,
+  logistic regression, XGBoost on v1 features, XGBoost on v2 features.
+- **A random split reported as a secondary comparison**, because
+  `flows/retrain_model.py` uses one, so the inflation it causes is visible
+  rather than implied.
+- **An explicit leakage experiment:** the same model with and without the four
+  balance columns and the two features derived from them, next to a
+  three-condition hand rule that uses nothing else.
+- **Fixed seed, local MLflow file store.** The evaluation logs runs to
+  `mlruns_evaluation/`, never to the tracking server and never to the registry.
+  Evaluating is not promoting.
+
+### Alternatives Considered
+
+1. **Keep the notebook numbers and just add PR-AUC** — Rejected. The split and
+   the threshold tuning were the larger problems; adding a metric to a broken
+   protocol produces a better-documented wrong answer.
+2. **Cross-validation instead of a single time split** — Rejected for the
+   headline numbers. K-fold on shuffled data reintroduces exactly the temporal
+   leakage the time split exists to prevent. Rolling-origin backtesting would be
+   the right generalisation and is the obvious next step; a single honest split
+   was the thing missing, and it is what the README claims.
+3. **Analytic confidence intervals** — Rejected. There is no clean closed form
+   for recall-at-a-precision-floor, and the bootstrap costs about nine seconds
+   per model.
+4. **Drop the balance columns from the production feature set outright** —
+   Not taken here. That is a modelling change, and this ADR is about
+   *measuring*. The measurement is now on the record, which is what any decision
+   to change the features would have to start from.
+
+### Consequences
+
+**Positive:**
+- Every published number is reproducible with one command from a committed
+  script, and the JSON is the single source of truth.
+- The v1-vs-v2 comparison is now answerable. Under this protocol the enriched
+  feature set improves PR-AUC by a margin whose intervals do not overlap
+  (0.9523 → 0.9752) but improves recall at 95% precision by 0.75 points, with
+  intervals that overlap almost entirely (82.8% [81.3, 84.0] → 83.6% [81.9,
+  84.8]). At the deployed threshold the two are indistinguishable.
+- The leakage experiment is unambiguous. A three-condition hand rule on the
+  balance columns reaches 97.4% recall at 100% precision — better than any
+  model in the table — and removing those columns drops the production
+  configuration from 0.975 PR-AUC to 0.215.
+
+**Negative:**
+- The honest numbers are worse than the ones they replace, and the headline
+  claim that the feature store is what lifted recall no longer survives contact
+  with a confidence interval. The README now says so.
+- `make evaluate` takes about three minutes on the full dataset. A
+  `--sample-frac` flag exists for quick checks and is clearly labelled as not
+  for reporting.
+- The validation split has a much lower fraud rate (0.061%) than the test split
+  (0.329%), an artifact of where PaySim puts its fraud in time. The threshold
+  tuned on it is conservative on test — precision comes out at 99.3% where only
+  95% was required, giving up roughly nine points of recall. That is a real
+  property of a time-split deployment and is now visible rather than hidden.
+
+**What this signals to interviewers:** knowing that the evaluation protocol is
+where most model claims actually fail, being able to say which direction each
+flaw biased the result, and being willing to publish the number that came out
+worse. The leakage experiment in particular is the difference between "my model
+gets 97% recall on PaySim" and understanding what PaySim is.
