@@ -41,11 +41,18 @@ away from the text. Regenerate with `make evaluate`, `make cost`, `make figures`
 drift injection -> Grafana spike -> alert email. Link goes here. -->
 *(not yet recorded)*
 
-<!-- TODO: screenshots. `make monitoring-up` brings Grafana up at
-     localhost:3000 with the dashboard already provisioned; run a session per
-     docs/measurement-session.md §4, then capture:
+![Grafana showing drift detected](reports/figures/grafana-drift-spike.png)
 
-![Grafana drift spike](reports/figures/grafana-drift-spike.png)
+*Drift detection firing during the injection run: `fraud_detector_drift_share`
+reaches 1.0 — every monitored column drifted — after 200 transactions with
+amounts roughly a thousand times normal were pushed through. Cropped as it
+stood then; the provisioned dashboard now leads with realized performance
+instead (see [Observability](#observability)).*
+
+<!-- TODO: two screenshots still to capture. `make monitoring-up` brings Grafana
+     up at localhost:3000 with the dashboard provisioned; run a session per
+     docs/measurement-session.md §4, then add:
+
 ![Realized performance under label delay](reports/figures/grafana-realized-performance.png)
 ![MLflow registry with aliases](reports/figures/mlflow-registry-aliases.png)
 -->
@@ -168,7 +175,9 @@ distribution against the training baseline using **Evidently**. It writes a full
 report to S3, pushes the key drift metrics to **Prometheus** (via a Pushgateway, since the
 flow is short-lived), which **Grafana** visualizes, and fires an **SNS** email alert when
 drift crosses a threshold. The chain was verified end-to-end by injecting transactions
-with amounts 100x normal — drift jumped to 100%, the dashboard lit up, and the alert
+with amounts roughly a thousand times normal (`scripts/inject_drift.py` draws from a
+lognormal with a median around 1.2M against normal traffic's 1.1K) — drift jumped to
+100%, the dashboard lit up, and the alert
 arrived.
 
 ### Infrastructure as code
