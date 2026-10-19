@@ -133,3 +133,75 @@ def test_training_is_reproducible(engineered: pd.DataFrame) -> None:
     )
     np.testing.assert_array_equal(first, second)
     assert RANDOM_SEED == 42  # the seed the rest of the project assumes
+
+
+def test_shifted_fraud_profile_evades_the_model(engineered: pd.DataFrame) -> None:
+    """The premise the performance-drop demo rests on.
+
+    `scripts/demo_performance_drop.py` claims that fraud which stops draining
+    the origin account becomes invisible to this model while barely moving the
+    input distribution. If that stops being true the demo proves nothing, so it
+    is asserted here rather than assumed.
+
+    The model is trained on the fixture's PaySim-style fraud (origin emptied),
+    then shown two batches it has never seen: more of the same pattern, and the
+    shifted one. It should catch the first and miss the second.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    train_df, val_df, _ = time_based_split_three_way(engineered)
+    model = _train(ENRICHED_FEATURE_COLUMNS, train_df)
+    threshold = find_threshold_for_precision(
+        val_df[LABEL_COLUMN].to_numpy(),
+        _probabilities(model, val_df, ENRICHED_FEATURE_COLUMNS),
+        min_precision=0.95,
+    )
+
+    spec = importlib.util.spec_from_file_location(
+        "producer", Path(__file__).resolve().parents[1] / "scripts" / "produce_transactions.py"
+    )
+    producer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(producer)
+
+    def flagged_share(generator) -> float:
+        """Score 200 generated transactions exactly as the Lambda would.
+
+        Feast features are the defaults, which is what a first-time sender gets.
+        """
+        rows = []
+        for i in range(200):
+            txn = generator(i + 1, None)
+            old_balance = txn["oldbalanceOrg"]
+            rows.append(
+                {
+                    "step": txn["step"],
+                    "type": txn["type"],
+                    "amount": txn["amount"],
+                    "oldbalanceOrg": old_balance,
+                    "newbalanceOrig": txn["newbalanceOrig"],
+                    "oldbalanceDest": txn["oldbalanceDest"],
+                    "newbalanceDest": txn["newbalanceDest"],
+                    "sender_txn_count_1h": 0,
+                    "sender_txn_count_24h": 0,
+                    "sender_amount_sum_24h": 0.0,
+                    "sender_amount_mean_historical": 0.0,
+                    "sender_time_since_last_txn": -1.0,
+                    "amount_to_oldbalance_ratio": (
+                        txn["amount"] / old_balance if old_balance > 0 else -1.0
+                    ),
+                    "drains_origin": (1 if (old_balance > 0 and txn["newbalanceOrig"] == 0) else 0),
+                }
+            )
+        proba = model.predict_proba(pd.DataFrame(rows)[ENRICHED_FEATURE_COLUMNS])[:, 1]
+        return float((proba >= threshold).mean())
+
+    caught = flagged_share(producer.generate_fraud_transaction)
+    evaded = flagged_share(producer.generate_shifted_fraud_transaction)
+
+    assert caught > 0.5, f"the model should catch its own training pattern, caught {caught:.1%}"
+    assert evaded < 0.2, f"the shifted profile should evade the model, flagged {evaded:.1%}"
+    assert caught - evaded > 0.4, (
+        f"the gap between the two profiles is what the demo shows; "
+        f"caught {caught:.1%} vs evaded {evaded:.1%}"
+    )

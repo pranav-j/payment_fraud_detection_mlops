@@ -50,6 +50,54 @@ REPLAY = str(REPO_ROOT / "scripts" / "replay_labels.py")
 PERF_FLOW = str(REPO_ROOT / "flows" / "monitor_performance.py")
 
 
+# Attribution is by the `source` tag the producer writes, never by timestamp.
+# The first live run of this demo was misread because a 20-minute query window
+# swept in an unrelated producer run from 18 minutes earlier and the two phases
+# came out mixed together.
+BY_PROFILE_SQL = """
+SELECT
+    g.source,
+    COUNT(*)                                   AS decisions,
+    COUNT(*) FILTER (WHERE g.is_fraud)         AS frauds,
+    COUNT(*) FILTER (WHERE g.is_fraud AND d.is_fraud) AS caught
+FROM decisions d
+JOIN ground_truth g USING (transaction_id)
+WHERE d.scored_at > NOW() - make_interval(secs => %(seconds)s)
+GROUP BY g.source
+ORDER BY g.source
+"""
+
+
+def report_by_profile(window_minutes: float) -> None:
+    """Recall per generator, so the two phases are compared exactly."""
+    from fraud_mlops.db import connect
+
+    conn = connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(BY_PROFILE_SQL, {"seconds": window_minutes * 60})
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    logger.info("Recall by generator (attributed via ground_truth.source):")
+    for source, decisions, frauds, caught in rows:
+        recall = f"{caught / frauds:.1%}" if frauds else "n/a"
+        logger.info(
+            "  %-22s decisions=%-5d frauds=%-4d caught=%-4d recall=%s",
+            source,
+            decisions,
+            frauds,
+            caught,
+            recall,
+        )
+    logger.info(
+        "  The shifted row should show markedly lower recall than the paysim row. "
+        "If it does not, the demo has not demonstrated anything — check that Feast "
+        "was materialised and that the model actually carries the @production alias."
+    )
+
+
 def _run(command: list[str], plan: bool, description: str) -> None:
     logger.info("%s", description)
     logger.info("  $ %s", " ".join(command))
@@ -82,6 +130,12 @@ def main() -> None:
         type=float,
         default=0.05,
         help="Label delay in wall-clock hours (0.05 = 3 minutes)",
+    )
+    parser.add_argument(
+        "--window-minutes",
+        type=float,
+        default=25.0,
+        help="How far back the per-profile report looks (default 25)",
     )
     parser.add_argument(
         "--plan", action="store_true", help="Print the commands without running them"
@@ -167,6 +221,9 @@ def main() -> None:
         "Phase 3 — running the performance flow: realized recall should now be "
         "below the floor, and SNS should fire",
     )
+
+    if not args.plan:
+        report_by_profile(args.window_minutes)
 
     logger.info("=" * 72)
     logger.info("What to look at now:")

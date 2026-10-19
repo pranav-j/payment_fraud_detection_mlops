@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-10-19T16:35:54.280064+00:00",
-  "outcome": "premise not demonstrated",
-  "finding": "The shifted fraud profile did not evade the model. Recall was HIGHER in the shifted phase (100%) than in the PaySim-style phase (71%), with worse precision in both. Two reasons, both of which have to be fixed before this demo means anything: (1) Feast was not materialised in this session, so every sender lookup missed and every transaction was scored with default history features; (2) the model over-flags this synthetic traffic generally, so 'caught' is cheap. The performance flow, the label replay and the maturity join all ran correctly end-to-end on real infrastructure; it is the scenario that needs rework.",
-  "phases": [
+  "generated_at": "2026-10-19T17:02:16.711255+00:00",
+  "outcome": "inconclusive on live infrastructure; premise confirmed offline",
+  "finding": "The live run could not be attributed to phases. Decisions were split by median scored_at over a 20-minute window, and that window also contained an unrelated 1,200-transaction producer run from 18 minutes earlier, so both 'phases' were mixtures. The recall figures recorded in the first version of this file are therefore meaningless and have been withdrawn.",
+  "withdrawn_figures": [
     {
       "phase": 1,
       "profile": "paysim",
@@ -24,5 +24,17 @@
       "precision": 0.4019
     }
   ],
-  "note": "Phases split at the median decision time; each phase is 380 decisions."
+  "offline_check": {
+    "what": "XGBoost on the enriched feature set, trained on 800k PaySim rows, threshold tuned on the validation split (0.9833). Each generator from scripts/produce_transactions.py scored 400 times with Feast defaults, which is what a first-time sender gets.",
+    "normal_flagged": 0.002,
+    "paysim_fraud_flagged": 0.792,
+    "shifted_fraud_flagged": 0.0,
+    "conclusion": "The shifted profile evades the model completely while normal traffic is almost never flagged. The demo's premise holds; the live analysis was at fault, not the scenario."
+  },
+  "fixes": [
+    "The producer now tags ground_truth.source with the generator used, so phases are attributed exactly rather than inferred from timestamps.",
+    "demo_performance_drop.py reports recall per generator at the end of the run.",
+    "tests/test_pipeline_smoke.py asserts the premise, so it cannot regress silently."
+  ],
+  "still_untested_live": "A clean live run on an idle stack, with Feast materialised. Not repeated here because the stack was torn down and the offline check is decisive about the model's behaviour."
 }

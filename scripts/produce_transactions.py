@@ -135,8 +135,14 @@ FRAUD_PROFILES = {
 }
 
 
-def record_ground_truth(conn, transaction_id: str, is_fraud: bool) -> None:
+def record_ground_truth(conn, transaction_id: str, is_fraud: bool, source: str) -> None:
     """Write the true outcome to `ground_truth`, never to the stream.
+
+    `source` carries which generator produced the row ("producer:paysim",
+    "producer:shifted"). Without it, attributing a decision to a demo phase
+    means guessing from timestamps — which is exactly how the first live run of
+    the demo was misread: a 20-minute query window swept in an unrelated
+    producer run from 18 minutes earlier, and the two phases came out mixed.
 
     This is what `scripts/replay_labels.py` later releases into `labels` once
     the configured delay has elapsed.
@@ -145,10 +151,10 @@ def record_ground_truth(conn, transaction_id: str, is_fraud: bool) -> None:
         cur.execute(
             """
             INSERT INTO ground_truth (transaction_id, is_fraud, source)
-            VALUES (%s, %s, 'producer')
+            VALUES (%s, %s, %s)
             ON CONFLICT (transaction_id) DO NOTHING
             """,
-            (transaction_id, is_fraud),
+            (transaction_id, is_fraud, source),
         )
     conn.commit()
 
@@ -228,7 +234,12 @@ def produce(
 
             # Truth goes to the database, never into the stream the model reads.
             if conn is not None:
-                record_ground_truth(conn, txn["transaction_id"], is_fraud)
+                record_ground_truth(
+                    conn,
+                    txn["transaction_id"],
+                    is_fraud,
+                    f"producer:{fraud_profile}" if is_fraud else "producer:normal",
+                )
 
             label = "FRAUD  " if is_fraud else "normal "
             print(
