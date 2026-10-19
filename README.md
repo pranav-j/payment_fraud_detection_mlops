@@ -37,9 +37,9 @@ Every number on this page traces to a file under [`reports/`](reports/), and eve
 figure is generated from those files by `make figures` — so the charts cannot drift
 away from the text. Regenerate with `make evaluate`, `make cost`, `make figures`.
 
-**Demo video:** <!-- TODO: 2-minute walkthrough — producer -> decisions ->
-drift injection -> Grafana spike -> alert email. Link goes here. -->
-*(not yet recorded)*
+**Demo video:** *(not yet recorded — script and shot list in
+[`docs/demo-video-script.md`](docs/demo-video-script.md))*
+<!-- TODO: paste the link here once the video is cut. -->
 
 ![Grafana showing drift detected](reports/figures/grafana-drift-spike.png)
 
