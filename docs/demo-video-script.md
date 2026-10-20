@@ -35,10 +35,14 @@ line that doesn't sound like you saying it; the timings below adjust.
 
 ### 1 · What it is — 0:00–0:23
 
+00:00
+
 > This is a real-time fraud detection pipeline on AWS. Kinesis and Lambda for
 > streaming inference, Feast for the feature store, MLflow for the registry, and
 > the whole stack in Terraform. The goal was never the best possible fraud model.
 > It was to build the system around a model the way a real team would.
+
+00:24.3
 
 **On screen:** README top — title, CI badge, the four result bullets.
 
@@ -51,6 +55,8 @@ line that doesn't sound like you saying it; the timings below adjust.
 > transaction, write the verdict to Postgres. Nothing waits on the result — it's
 > fire-and-forget. Every row carries the model version and the ingest-to-decision
 > latency. Warm, the function runs in forty-four milliseconds.
+
+00:54.5
 
 **On screen:** split — producer terminal streaming on the left, `psql` tailing
 `decisions` on the right, rows appearing. Then the latency report.
@@ -67,6 +73,8 @@ line that doesn't sound like you saying it; the timings below adjust.
 > PR-AUC falls from point nine seven to point two one. That is the most important
 > fact about any result on this dataset, so it goes in the README.
 
+01:30.5
+
 **On screen:** `reports/figures/evaluation-leakage.png`, held. Then the
 README's Evaluation table.
 **Needs:** nothing — committed artifacts.
@@ -79,11 +87,17 @@ README's Evaluation table.
 > Evidently catches the shift, pushes the metrics to Prometheus, Grafana lights
 > up, SNS sends the alert.
 
+01:49.3
+
 **On screen:** `inject_drift.py` running → Grafana drift panel going red →
 the alert email.
 **Needs:** AWS stack up (SNS, RDS). Grafana is local.
 
 ---
+
+Cut away this part, issue is here.
+
+01:52.8
 
 ### 5 · What drift cannot see — 1:32–2:02
 
@@ -93,6 +107,8 @@ the alert email.
 > labels are chargebacks — they arrive weeks after the transaction. The dashboard
 > shows how much of each window it cannot judge yet. Recall computed over labels
 > that have not arrived means nothing.
+
+02:19.6
 
 **On screen:** the realized-performance panels — recall against the floor line,
 then the label-maturity panel beside it.

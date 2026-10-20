@@ -206,8 +206,11 @@ def detect_drift_flow(
         return
 
     metrics = run_drift_report(reference=reference, current=current)
-    send_alert_if_drift(metrics=metrics)
+    # Publish metrics before alerting. An SNS failure used to abort the flow
+    # here and take the telemetry with it — so a broken notification channel
+    # also blinded the dashboard, which is exactly backwards.
     push_metrics_to_prometheus(metrics=metrics)
+    send_alert_if_drift(metrics=metrics)
     logger.info("Drift detection complete.")
 
 
