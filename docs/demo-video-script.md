@@ -1,9 +1,8 @@
 # Demo video — narration script and shot list
 
-**Length: 312 words**, which is about 2:14 read at a natural 140 words per
-minute, or 2:05 at 150. If you want it strictly under two minutes, drop the last
-sentence of section 3 and the last sentence of section 5 — both are asides, and
-the beats survive without them.
+**Length: 313 words**, about 2:14 read at a natural 140 words per minute. If you
+want it under two minutes, cut the last sentence of section 3 and the last
+sentence of section 5 — both are asides and the beats hold without them.
 
 Read it straight through in one take if you can; I cut the visuals to fit your
 audio afterwards, not the other way round.
@@ -13,8 +12,10 @@ seconds before deciding whether to read the README. So it opens with what the
 thing is, and the strongest beat (the leakage finding) lands before the halfway
 mark — not saved for the end.
 
-**Tone:** the same first-person engineering voice as the README. You're walking
-a competent peer through it, not pitching.
+**Tone:** your README voice — declarative, concrete, one judgment per beat. It
+leans on the constructions you already use there: arrow notation for the
+pipeline, flat statements of fact before the consequence, no hedging. Change any
+line that doesn't sound like you saying it; the timings below adjust.
 
 ---
 
@@ -32,23 +33,24 @@ a competent peer through it, not pitching.
 
 ## The script
 
-### 1 · What it is — 0:00–0:20
+### 1 · What it is — 0:00–0:23
 
 > This is a real-time fraud detection pipeline on AWS. Kinesis and Lambda for
-> streaming inference, a Feast feature store, MLflow for the model registry, and
-> the whole stack defined in Terraform. I want to show you three things it does,
-> and one thing it taught me.
+> streaming inference, Feast for the feature store, MLflow for the registry, and
+> the whole stack in Terraform. The goal was never the best possible fraud model.
+> It was to build the system around a model the way a real team would.
 
 **On screen:** README top — title, CI badge, the four result bullets.
 
 ---
 
-### 2 · The streaming path — 0:20–0:38
+### 2 · The streaming path — 0:23–0:47
 
-> A producer pushes transactions into Kinesis. Lambda picks up each batch, pulls
-> that sender's history from Redis through Feast, scores it, and writes the
-> verdict to Postgres — with the model version and the latency on every row.
-> Warm, that's forty-four milliseconds.
+> The streaming path is the core. Producer, Kinesis, Lambda. Each batch triggers
+> the function: look up the sender's history from Redis through Feast, score the
+> transaction, write the verdict to Postgres. Nothing waits on the result — it's
+> fire-and-forget. Every row carries the model version and the ingest-to-decision
+> latency. Warm, the function runs in forty-four milliseconds.
 
 **On screen:** split — producer terminal streaming on the left, `psql` tailing
 `decisions` on the right, rows appearing. Then the latency report.
@@ -56,15 +58,14 @@ a competent peer through it, not pitching.
 
 ---
 
-### 3 · What it taught me — 0:38–1:17
+### 3 · What it taught me — 0:47–1:21
 
-> Now the thing it taught me. I re-measured the model honestly — split by time,
-> threshold tuned on validation, bootstrap intervals throughout. And a
-> three-condition rule I wrote by hand beat every model I'd trained. PaySim
-> generates fraud by emptying the account, so the balance columns give the answer
-> away. Take them out and the model falls from point nine seven PR-AUC to point
-> two one. That's the most important thing to know about any result on this
-> dataset, so it's in the README rather than buried in a notebook.
+> Then I re-measured the model properly. Split by time, threshold tuned on a
+> validation window, bootstrap intervals on everything. A three-condition rule I
+> wrote by hand beat every model I had trained. PaySim generates fraud by draining
+> the origin account, so the balance columns hand you the label. Remove them and
+> PR-AUC falls from point nine seven to point two one. That is the most important
+> fact about any result on this dataset, so it goes in the README.
 
 **On screen:** `reports/figures/evaluation-leakage.png`, held. Then the
 README's Evaluation table.
@@ -72,11 +73,11 @@ README's Evaluation table.
 
 ---
 
-### 4 · Drift monitoring — 1:17–1:29
+### 4 · Drift monitoring — 1:21–1:32
 
-> Monitoring. I inject transactions with amounts about a thousand times normal.
-> Evidently catches the distribution shift, pushes the metrics to Prometheus,
-> Grafana lights up, and SNS sends the alert.
+> Monitoring. I inject transactions with amounts a thousand times normal.
+> Evidently catches the shift, pushes the metrics to Prometheus, Grafana lights
+> up, SNS sends the alert.
 
 **On screen:** `inject_drift.py` running → Grafana drift panel going red →
 the alert email.
@@ -84,14 +85,14 @@ the alert email.
 
 ---
 
-### 5 · What drift cannot see — 1:29–2:02
+### 5 · What drift cannot see — 1:32–2:02
 
-> But drift only watches the inputs. If fraud changes shape *within* the normal
-> range, the inputs barely move and recall quietly collapses. So a second flow
-> measures whether the model was actually right — against labels that have
-> matured. Real fraud labels are chargebacks; they arrive weeks later. The
-> dashboard shows how much of each window it can't judge yet, because recall
-> over labels that haven't arrived is a lie with a decimal point on it.
+> Drift only watches the inputs. If fraud changes shape inside the normal range,
+> the inputs barely move and recall drops with nothing firing. So a second flow
+> measures whether the model was right, against labels that have matured. Fraud
+> labels are chargebacks — they arrive weeks after the transaction. The dashboard
+> shows how much of each window it cannot judge yet. Recall computed over labels
+> that have not arrived means nothing.
 
 **On screen:** the realized-performance panels — recall against the floor line,
 then the label-maturity panel beside it.
@@ -101,9 +102,8 @@ then the label-maturity panel beside it.
 
 ### 6 · Close — 2:02–2:14
 
-> It costs fifteen cents an hour running, two dollars a month torn down. Every
-> number in the README comes from a file a committed script generated. Code's
-> linked below.
+> Fifteen cents an hour running, two dollars a month torn down. Every number in
+> the README comes from a file a committed script generated. Code is below.
 
 **On screen:** cost table, then the repo page.
 
